@@ -1,9 +1,8 @@
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
-use conan::Conanfile;
+use cmake::{BuildType, CMake, CppStandard};
+use conan::{Conan, Conanfile};
 use std::{process::Command, str::FromStr};
-
-use crate::conan::Conan;
 
 mod cmake;
 mod conan;
@@ -29,6 +28,10 @@ enum Commands {
         /// Initialize an empty git repository in the sandbox
         #[arg(long, action)]
         git: bool,
+
+        /// Set the CppStandard
+        #[arg(long)]
+        standard: Option<CppStandard>,
     },
     /// Add a Conan dependency to the current sandbox (in the current working directory)
     Add {
@@ -39,13 +42,13 @@ enum Commands {
     Build {
         /// Build type (default: Debug)
         #[arg(long, short)]
-        build_type: Option<String>,
+        build_type: Option<BuildType>,
     },
     /// Run the current sandbox project (build if necessary)
     Run {
         /// Build type (default: Debug)
         #[arg(long, short)]
-        build_type: Option<String>,
+        build_type: Option<BuildType>,
     },
 }
 
@@ -53,16 +56,20 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::New { sandbox_name, git } => cmd_new(&sandbox_name, git)?,
+        Commands::New {
+            sandbox_name,
+            git,
+            standard,
+        } => cmd_new(&sandbox_name, git, standard.unwrap_or_default())?,
         Commands::Add { dependency } => cmd_add(&dependency)?,
-        Commands::Build { build_type } => cmd_build(build_type)?,
-        Commands::Run { build_type } => cmd_run(build_type)?,
+        Commands::Build { build_type } => cmd_build(build_type.unwrap_or_default())?,
+        Commands::Run { build_type } => cmd_run(build_type.unwrap_or_default())?,
     }
     Ok(())
 }
 
 /// Create a new sandbox directory with a minimal setup (CMakeLists.txt, conanfile.py, main.cpp).
-fn cmd_new(sandbox_name: &str, git: bool) -> Result<()> {
+fn cmd_new(sandbox_name: &str, git: bool, standard: CppStandard) -> Result<()> {
     // 1. Create the sandbox directory
     std::fs::create_dir(sandbox_name)?;
 
@@ -77,31 +84,17 @@ int main() {
     std::fs::write(format!("{}/main.cpp", sandbox_name), main_cpp_content)?;
 
     // 3. Write a minimal CMakeLists.txt
-    let cmake_lists_content = format!(
-        r#"cmake_minimum_required(VERSION 3.15)
-project({} LANGUAGES CXX)
-
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-# Include Conan-generated cmake files
-# Typically: include(${{CMAKE_BINARY_DIR}}/conan_deps.cmake)
-
-add_executable(sandbox main.cpp)
-"#,
-        sandbox_name
-    );
-
+    let cmake = CMake::new(sandbox_name.to_string(), standard, true);
     std::fs::write(
         format!("{}/CMakeLists.txt", sandbox_name),
-        cmake_lists_content,
+        cmake.to_string(),
     )?;
 
     // 4. Write a minimal conanfile.py
     let conanfile = Conanfile::new();
     std::fs::write(
         format!("{}/conanfile.py", sandbox_name),
-        conanfile.to_string().as_str(),
+        conanfile.to_string(),
     )?;
 
     if git {
@@ -151,33 +144,10 @@ fn cmd_add(expr: &str) -> Result<()> {
 ///   1. `conan install . --build=missing --output-folder=build`
 ///   2. `cmake -B build -DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake -DCMAKE_BUILD_TYPE=Release`
 ///   3. `cmake --build build`
-fn cmd_build(build_type: Option<String>) -> Result<()> {
+fn cmd_build(build_type: BuildType) -> Result<()> {
     // Step 1: conan install
     Conan::new()?.install(".", "build")?;
-
-    // Step 2: cmake configure
-    let cmake_configure = Command::new("cmake")
-        .args([
-            "-B",
-            "build",
-            "-DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake",
-            format!(
-                "-DCMAKE_BUILD_TYPE={}",
-                build_type.unwrap_or("Debug".to_string())
-            )
-            .as_str(),
-            "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
-        ])
-        .status()?;
-    if !cmake_configure.success() {
-        bail!("CMake configure failed");
-    }
-
-    // Step 3: cmake --build
-    let cmake_build = Command::new("cmake").args(["--build", "build"]).status()?;
-    if !cmake_build.success() {
-        bail!("CMake build failed");
-    }
+    CMake::build(build_type)?;
 
     println!("Build successful!");
     Ok(())
@@ -185,7 +155,7 @@ fn cmd_build(build_type: Option<String>) -> Result<()> {
 
 /// Run the current sandbox project.
 /// If the binary does not exist or is out of date, rebuild first, then run.
-fn cmd_run(build_type: Option<String>) -> Result<()> {
+fn cmd_run(build_type: BuildType) -> Result<()> {
     cmd_build(build_type)?;
 
     let binary_path = "./build/sandbox"; // or "./build/my_sandbox"
