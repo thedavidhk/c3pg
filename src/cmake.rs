@@ -1,6 +1,9 @@
-use std::{fmt::Display, process::Command, str::FromStr};
+use std::{fmt::Display, fs, path::Path, process::Command, str::FromStr};
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
+use regex::Regex;
+
+use crate::dependency::Dependency;
 
 #[derive(Debug, Default, Clone)]
 pub enum BuildType {
@@ -75,6 +78,7 @@ pub struct CMake {
     pub project_name: String,
     pub cpp_standard: CppStandard,
     pub export_compile_commands: bool,
+    dependencies: Vec<String>,
 }
 
 impl CMake {
@@ -87,6 +91,7 @@ impl CMake {
             project_name,
             cpp_standard,
             export_compile_commands,
+            dependencies: vec![],
         }
     }
 
@@ -112,19 +117,69 @@ impl CMake {
         }
         Ok(())
     }
+
+    pub fn add_dependency(&mut self, dep: &Dependency) {
+        self.dependencies.push(dep.name.clone());
+    }
+
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let content = fs::read_to_string(&path).with_context(|| {
+            format!(
+                "Could not read from {}",
+                path.as_ref().to_path_buf().display()
+            )
+        })?;
+        Self::from_str(content.as_str()).with_context(|| {
+            format!(
+                "Could not parse CMake from {}",
+                path.as_ref().to_path_buf().display()
+            )
+        })
+    }
+
+    pub fn to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        Ok(std::fs::write(path, self.to_string())?)
+    }
 }
 
 impl Display for CMake {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let format_dependencies = |prefix: &str, suffix: &str| {
+            self.dependencies
+                .iter()
+                .map(|dep| {
+                    let mut result = String::new();
+                    result.push_str(prefix); // Start with the prefix
+                    result.push_str(dep); // Add the dependency name
+                    result.push_str(suffix); // Add the suffix
+                    result
+                })
+                .collect::<Vec<String>>()
+                .join("\n")
+        };
+
+        let find_packages = format_dependencies("find_package(", ")");
+        let link_libs = format_dependencies("target_link_libraries(sandbox ${", "_LIBRARIES})");
+        let include_dirs = format_dependencies(
+            "target_include_directories(sandbox PRIVATE ${",
+            "_INCLUDE_DIRS})",
+        );
+
         write!(
             f,
             r#"cmake_minimum_required(VERSION 3.15)
 project({} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD {})
-set(CMAKE_CXX_STANDARD_REQUIRED {})
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS {})
+
+include(${{CMAKE_BINARY_DIR}}/conan_toolchain.cmake)
+{}
 
 add_executable(sandbox main.cpp)
+{}
+{}
 "#,
             self.project_name,
             self.cpp_standard,
@@ -132,7 +187,61 @@ add_executable(sandbox main.cpp)
                 "ON"
             } else {
                 "OFF"
-            }
+            },
+            find_packages,
+            link_libs,
+            include_dirs
         )
+    }
+}
+
+impl FromStr for CMake {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut project_name = String::new();
+        let mut cpp_standard = CppStandard::default();
+        let mut export_compile_commands = false;
+        let mut dependencies = Vec::new();
+
+        // Regex patterns for different parts
+        let project_re = Regex::new(r"^project\((.*?) LANGUAGES CXX\)").unwrap();
+        let cpp_standard_re = Regex::new(r"^set\(CMAKE_CXX_STANDARD (\d+)\)").unwrap();
+        let export_compile_commands_re =
+            Regex::new(r"^set\(CMAKE_EXPORT_COMPILE_COMMANDS (ON|OFF)\)").unwrap();
+        let find_package_re = Regex::new(r"^find_package\((.*?)\)").unwrap();
+        let link_lib_re = Regex::new(r"^target_link_libraries\(sandbox (.*?)_LIBRARIES\)").unwrap();
+        let include_dir_re =
+            Regex::new(r"^target_include_directories\(sandbox PRIVATE (.*?)_INCLUDE_DIRS\)")
+                .unwrap();
+
+        // Iterate over the lines and apply regex matching
+        for line in s.lines() {
+            if let Some(caps) = project_re.captures(line) {
+                project_name = caps[1].to_string();
+            } else if let Some(caps) = cpp_standard_re.captures(line) {
+                cpp_standard = CppStandard::from_str(&caps[1])?;
+            } else if let Some(caps) = export_compile_commands_re.captures(line) {
+                export_compile_commands = caps[1] == *"ON";
+            } else if let Some(caps) = find_package_re.captures(line) {
+                dependencies.push(caps[1].to_string());
+            } else if let Some(caps) = link_lib_re.captures(line) {
+                dependencies.push(caps[1].to_string());
+            } else if let Some(caps) = include_dir_re.captures(line) {
+                dependencies.push(caps[1].to_string());
+            }
+        }
+
+        // Check if all necessary fields were populated
+        if project_name.is_empty() {
+            bail!("Missing project name");
+        }
+
+        Ok(CMake {
+            project_name,
+            cpp_standard,
+            export_compile_commands,
+            dependencies,
+        })
     }
 }

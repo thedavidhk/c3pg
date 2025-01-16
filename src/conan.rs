@@ -113,8 +113,19 @@ impl Conanfile {
         Ok(std::fs::write(path, self.to_string())?)
     }
 
-    pub fn add_requirement(&mut self, dependency: &Dependency) {
-        self.requirements.push(dependency.clone());
+    pub fn add_dependency(&mut self, dependency: Dependency) {
+        // Find the position of the existing dependency with the same name
+        if let Some(pos) = self
+            .requirements
+            .iter_mut()
+            .position(|dep| dep.name == dependency.name)
+        {
+            // Replace the existing dependency in place
+            self.requirements[pos] = dependency;
+        } else {
+            // If no duplicate is found, simply add the new dependency
+            self.requirements.push(dependency);
+        }
     }
 }
 
@@ -132,7 +143,7 @@ impl FromStr for Conanfile {
         for cap in re.captures_iter(s) {
             let dependency_str = &cap[1];
             if let Ok(dependency) = dependency_str.parse::<Dependency>() {
-                conanfile.add_requirement(&dependency);
+                conanfile.add_dependency(dependency);
             } else {
                 eprintln!("Warning: Could not parse dependency '{}'", dependency_str);
             }

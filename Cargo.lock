@@ -113,6 +113,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b63caa9aa9397e2d9480a9b13673856c78d8ac123288526c37d7839f2a86990"
 
 [[package]]
+name = "cpppg"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "clap_derive",
+ "regex",
+]
+
+[[package]]
 name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -129,16 +139,6 @@ name = "memchr"
 version = "2.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
-
-[[package]]
-name = "playground"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "clap_derive",
- "regex",
-]
 
 [[package]]
 name = "proc-macro2"

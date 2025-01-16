@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use clap::{Parser, Subcommand};
+use clap::{ArgAction, Parser, Subcommand};
 use cmake::{BuildType, CMake, CppStandard};
 use conan::{Conan, Conanfile};
 use std::process::Command;
@@ -8,9 +8,9 @@ mod cmake;
 mod conan;
 mod dependency;
 
-/// Top-level CLI parser.
+/// cpppg: Create, manage, and run C++ project sandboxes
 #[derive(Parser, Debug)]
-#[command(name = "cpp_sandbox")]
+#[command(name = "cpppg")]
 #[command(author, version, about, long_about = None)]
 struct Cli {
     #[command(subcommand)]
@@ -25,9 +25,9 @@ enum Commands {
         /// The name of the new sandbox directory
         sandbox_name: String,
 
-        /// Initialize an empty git repository in the sandbox
-        #[arg(long, action)]
-        git: bool,
+        /// Do not initialize an empty git repository in the sandbox
+        #[arg(long, action(ArgAction::SetFalse))]
+        no_git: bool,
 
         /// Set the CppStandard
         #[arg(long)]
@@ -58,9 +58,9 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::New {
             sandbox_name,
-            git,
+            no_git,
             standard,
-        } => cmd_new(&sandbox_name, git, standard.unwrap_or_default())?,
+        } => cmd_new(&sandbox_name, no_git, standard.unwrap_or_default())?,
         Commands::Add { dependency } => cmd_add(&dependency)?,
         Commands::Build { build_type } => cmd_build(build_type.unwrap_or_default())?,
         Commands::Run { build_type } => cmd_run(build_type.unwrap_or_default())?,
@@ -121,15 +121,19 @@ fn cmd_add(expr: &str) -> Result<()> {
         .get_latest_matching_dependency(expr)
         .ok_or(anyhow!("Could not find dependency {} in remotes", expr))?;
 
-    // 1. Read and parse existing conanfile.py
+    // 1. Read and parse existing conanfile.py and CMakeLists.txt
     let conanfile_path = "conanfile.py";
     let mut conanfile = Conanfile::from_file(conanfile_path)?;
+    let cmake_path = "CMakeLists.txt";
+    let mut cmake = CMake::from_file(cmake_path)?;
 
     // 2. Add dependency
-    conanfile.add_requirement(&dependency.clone());
+    conanfile.add_dependency(dependency.clone());
+    cmake.add_dependency(&dependency);
 
     // 3. Write back the file
     conanfile.to_file(conanfile_path)?;
+    cmake.to_file(cmake_path)?;
 
     println!("Added dependency '{}'", dependency);
     Ok(())
