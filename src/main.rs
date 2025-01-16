@@ -1,8 +1,8 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
 use cmake::{BuildType, CMake, CppStandard};
 use conan::{Conan, Conanfile};
-use std::{process::Command, str::FromStr};
+use std::process::Command;
 
 mod cmake;
 mod conan;
@@ -123,29 +123,20 @@ fn cmd_add(expr: &str) -> Result<()> {
 
     // 1. Read and parse existing conanfile.py
     let conanfile_path = "conanfile.py";
-    let contents = std::fs::read_to_string(conanfile_path)
-        .with_context(|| format!("Could not read from {}", conanfile_path))?;
-    let mut conanfile = Conanfile::from_str(contents.as_str())
-        .with_context(|| format!("Could not parse conanfile {}", conanfile_path))?;
+    let mut conanfile = Conanfile::from_file(conanfile_path)?;
 
     // 2. Add dependency
-    conanfile.add_requirement(dependency.clone());
+    conanfile.add_requirement(&dependency.clone());
 
     // 3. Write back the file
-    std::fs::write(conanfile_path, conanfile.to_string())
-        .with_context(|| format!("Could not write to {}", conanfile_path))?;
+    conanfile.to_file(conanfile_path)?;
 
     println!("Added dependency '{}'", dependency);
     Ok(())
 }
 
 /// Build the current sandbox project.
-/// Steps:
-///   1. `conan install . --build=missing --output-folder=build`
-///   2. `cmake -B build -DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake -DCMAKE_BUILD_TYPE=Release`
-///   3. `cmake --build build`
 fn cmd_build(build_type: BuildType) -> Result<()> {
-    // Step 1: conan install
     Conan::new()?.install(".", "build")?;
     CMake::build(build_type)?;
 
@@ -160,7 +151,6 @@ fn cmd_run(build_type: BuildType) -> Result<()> {
 
     let binary_path = "./build/sandbox"; // or "./build/my_sandbox"
     if cfg!(target_os = "windows") {
-        // On Windows, it would be something like "build\sandbox.exe"
         std::process::Command::new(format!("{}.exe", binary_path)).status()?;
     } else {
         std::process::Command::new(binary_path).status()?;

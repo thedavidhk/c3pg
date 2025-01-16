@@ -1,9 +1,10 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use regex::Regex;
 use std::io::BufRead;
+use std::path::Path;
 use std::process::Command;
 use std::str::FromStr;
-use std::fmt;
+use std::{fmt, fs};
 
 use crate::dependency::Dependency;
 
@@ -93,8 +94,27 @@ impl Conanfile {
         }
     }
 
-    pub fn add_requirement(&mut self, dependency: Dependency) {
-        self.requirements.push(dependency);
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let content = fs::read_to_string(&path).with_context(|| {
+            format!(
+                "Could not read from conanfile {}",
+                path.as_ref().to_path_buf().display()
+            )
+        })?;
+        Self::from_str(content.as_str()).with_context(|| {
+            format!(
+                "Could not parse conanfile {}",
+                path.as_ref().to_path_buf().display()
+            )
+        })
+    }
+
+    pub fn to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        Ok(std::fs::write(path, self.to_string())?)
+    }
+
+    pub fn add_requirement(&mut self, dependency: &Dependency) {
+        self.requirements.push(dependency.clone());
     }
 }
 
@@ -112,7 +132,7 @@ impl FromStr for Conanfile {
         for cap in re.captures_iter(s) {
             let dependency_str = &cap[1];
             if let Ok(dependency) = dependency_str.parse::<Dependency>() {
-                conanfile.add_requirement(dependency);
+                conanfile.add_requirement(&dependency);
             } else {
                 eprintln!("Warning: Could not parse dependency '{}'", dependency_str);
             }
