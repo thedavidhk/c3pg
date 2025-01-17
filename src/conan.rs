@@ -1,12 +1,13 @@
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, Result};
+use macros::FileWrapper;
 use regex::Regex;
 use std::io::BufRead;
-use std::path::Path;
 use std::process::Command;
 use std::str::FromStr;
-use std::{fmt, fs};
+use std::fmt;
 
 use crate::dependency::Dependency;
+use crate::file_wrapper::FileWrapper;
 
 #[derive(Debug)]
 pub struct Conan {
@@ -82,7 +83,7 @@ impl Conan {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, FileWrapper)]
 pub struct Conanfile {
     requirements: Vec<Dependency>,
 }
@@ -92,25 +93,6 @@ impl Conanfile {
         Self {
             requirements: Vec::new(),
         }
-    }
-
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let content = fs::read_to_string(&path).with_context(|| {
-            format!(
-                "Could not read from conanfile {}",
-                path.as_ref().to_path_buf().display()
-            )
-        })?;
-        Self::from_str(content.as_str()).with_context(|| {
-            format!(
-                "Could not parse conanfile {}",
-                path.as_ref().to_path_buf().display()
-            )
-        })
-    }
-
-    pub fn to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        Ok(std::fs::write(path, self.to_string())?)
     }
 
     pub fn add_dependency(&mut self, dependency: Dependency) {

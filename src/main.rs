@@ -2,11 +2,13 @@ use anyhow::{anyhow, Result};
 use clap::{ArgAction, Parser, Subcommand};
 use cmake::{BuildType, CMake, CppStandard};
 use conan::{Conan, Conanfile};
+use file_wrapper::FileWrapper;
 use std::process::Command;
 
 mod cmake;
 mod conan;
 mod dependency;
+mod file_wrapper;
 
 /// cpppg: Create, manage, and run C++ project sandboxes
 #[derive(Parser, Debug)]

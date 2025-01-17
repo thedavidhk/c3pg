@@ -1,9 +1,9 @@
-use std::{fmt::Display, fs, path::Path, process::Command, str::FromStr};
-
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
+use macros::FileWrapper;
 use regex::Regex;
+use std::{fmt::Display, process::Command, str::FromStr};
 
-use crate::dependency::Dependency;
+use crate::{dependency::Dependency, file_wrapper::FileWrapper};
 
 #[derive(Debug, Default, Clone)]
 pub enum BuildType {
@@ -73,7 +73,7 @@ impl FromStr for CppStandard {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, FileWrapper)]
 pub struct CMake {
     pub project_name: String,
     pub cpp_standard: CppStandard,
@@ -120,25 +120,6 @@ impl CMake {
 
     pub fn add_dependency(&mut self, dep: &Dependency) {
         self.dependencies.push(dep.name.clone());
-    }
-
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let content = fs::read_to_string(&path).with_context(|| {
-            format!(
-                "Could not read from {}",
-                path.as_ref().to_path_buf().display()
-            )
-        })?;
-        Self::from_str(content.as_str()).with_context(|| {
-            format!(
-                "Could not parse CMake from {}",
-                path.as_ref().to_path_buf().display()
-            )
-        })
-    }
-
-    pub fn to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        Ok(std::fs::write(path, self.to_string())?)
     }
 }
 
