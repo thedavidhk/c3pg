@@ -1,5 +1,4 @@
 use anyhow::{bail, Result};
-use macros::FileWrapper;
 use regex::Regex;
 use std::{fmt::Display, process::Command, str::FromStr};
 

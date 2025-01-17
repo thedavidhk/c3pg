@@ -1,5 +1,4 @@
 use anyhow::{anyhow, bail, Result};
-use macros::FileWrapper;
 use regex::Regex;
 use std::io::BufRead;
 use std::process::Command;

@@ -1,4 +1,5 @@
 use anyhow::Result;
+pub use macros::FileWrapper;
 
 pub trait FileWrapper {
     fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, std::io::Error>
