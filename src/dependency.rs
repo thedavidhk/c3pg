@@ -1,8 +1,9 @@
 use anyhow::anyhow;
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use std::{fmt, str::FromStr};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Dependency {
     pub name: String,
     pub version: Option<String>,

@@ -1,24 +1,30 @@
 use anyhow::{anyhow, bail, Result};
-use regex::Regex;
+use std::fmt;
 use std::io::BufRead;
 use std::process::Command;
 use std::str::FromStr;
-use std::fmt;
 
+use crate::config::Config;
 use crate::dependency::Dependency;
-use crate::file_wrapper::FileWrapper;
+use crate::traits::ToFile;
 
-#[derive(Debug)]
+#[derive(Debug, ToFile)]
 pub struct Conan {
     bin: String,
     remote: String,
+    requirements: Vec<Dependency>,
 }
 
 impl Conan {
-    pub fn new() -> Result<Self> {
+    pub fn from_config(config: &Config) -> Result<Self> {
         Ok(Self {
-            bin: "conan".to_string(),
-            remote: Self::get_first_remote("conan")?,
+            bin: config.conan.bin.clone(),
+            remote: config
+                .conan
+                .remote
+                .clone()
+                .unwrap_or(Self::get_first_remote("conan")?),
+            requirements: config.project.dependencies.clone(),
         })
     }
 
@@ -82,59 +88,7 @@ impl Conan {
     }
 }
 
-#[derive(Debug, FileWrapper)]
-pub struct Conanfile {
-    requirements: Vec<Dependency>,
-}
-
-impl Conanfile {
-    pub fn new() -> Self {
-        Self {
-            requirements: Vec::new(),
-        }
-    }
-
-    pub fn add_dependency(&mut self, dependency: Dependency) {
-        // Find the position of the existing dependency with the same name
-        if let Some(pos) = self
-            .requirements
-            .iter_mut()
-            .position(|dep| dep.name == dependency.name)
-        {
-            // Replace the existing dependency in place
-            self.requirements[pos] = dependency;
-        } else {
-            // If no duplicate is found, simply add the new dependency
-            self.requirements.push(dependency);
-        }
-    }
-}
-
-impl FromStr for Conanfile {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        // Initialize the Conanfile struct
-        let mut conanfile = Self::new();
-
-        // Use regex to extract `self.requires("dependency")` lines
-        let re = Regex::new(r#"self\.requires\("([^"]+)"\)"#)
-            .expect("Failed to compile regex for parsing requirements");
-
-        for cap in re.captures_iter(s) {
-            let dependency_str = &cap[1];
-            if let Ok(dependency) = dependency_str.parse::<Dependency>() {
-                conanfile.add_dependency(dependency);
-            } else {
-                eprintln!("Warning: Could not parse dependency '{}'", dependency_str);
-            }
-        }
-
-        Ok(conanfile)
-    }
-}
-
-impl fmt::Display for Conanfile {
+impl fmt::Display for Conan {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let requirements = if self.requirements.is_empty() {
             "        pass".to_string()

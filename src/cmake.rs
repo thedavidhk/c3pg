@@ -1,8 +1,8 @@
 use anyhow::{bail, Result};
-use regex::Regex;
+use serde::{Deserialize, Serialize};
 use std::{fmt::Display, process::Command, str::FromStr};
 
-use crate::{dependency::Dependency, file_wrapper::FileWrapper};
+use crate::{config::Config, dependency::Dependency, traits::ToFile};
 
 #[derive(Debug, Default, Clone)]
 pub enum BuildType {
@@ -32,7 +32,7 @@ impl FromStr for BuildType {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Deserialize, Serialize, Clone)]
 pub enum CppStandard {
     Cpp03,
     Cpp11,
@@ -72,28 +72,15 @@ impl FromStr for CppStandard {
     }
 }
 
-#[derive(Debug, FileWrapper)]
+#[derive(Debug, ToFile)]
 pub struct CMake {
     pub project_name: String,
     pub cpp_standard: CppStandard,
     pub export_compile_commands: bool,
-    dependencies: Vec<String>,
+    dependencies: Vec<Dependency>,
 }
 
 impl CMake {
-    pub fn new(
-        project_name: String,
-        cpp_standard: CppStandard,
-        export_compile_commands: bool,
-    ) -> Self {
-        Self {
-            project_name,
-            cpp_standard,
-            export_compile_commands,
-            dependencies: vec![],
-        }
-    }
-
     pub fn build(build_type: BuildType) -> Result<()> {
         // Step 1: cmake configure
         let cmake_configure = Command::new("cmake")
@@ -117,8 +104,13 @@ impl CMake {
         Ok(())
     }
 
-    pub fn add_dependency(&mut self, dep: &Dependency) {
-        self.dependencies.push(dep.name.clone());
+    pub fn from_config(config: &Config) -> Self {
+        Self {
+            project_name: config.project.name.clone(),
+            cpp_standard: config.cmake.standard.clone(),
+            export_compile_commands: config.cmake.export_compile_commands,
+            dependencies: config.project.dependencies.clone(),
+        }
     }
 }
 
@@ -130,7 +122,7 @@ impl Display for CMake {
                 .map(|dep| {
                     let mut result = String::new();
                     result.push_str(prefix); // Start with the prefix
-                    result.push_str(dep); // Add the dependency name
+                    result.push_str(&dep.name); // Add the dependency name
                     result.push_str(suffix); // Add the suffix
                     result
                 })
@@ -172,56 +164,5 @@ add_executable(sandbox main.cpp)
             link_libs,
             include_dirs
         )
-    }
-}
-
-impl FromStr for CMake {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut project_name = String::new();
-        let mut cpp_standard = CppStandard::default();
-        let mut export_compile_commands = false;
-        let mut dependencies = Vec::new();
-
-        // Regex patterns for different parts
-        let project_re = Regex::new(r"^project\((.*?) LANGUAGES CXX\)").unwrap();
-        let cpp_standard_re = Regex::new(r"^set\(CMAKE_CXX_STANDARD (\d+)\)").unwrap();
-        let export_compile_commands_re =
-            Regex::new(r"^set\(CMAKE_EXPORT_COMPILE_COMMANDS (ON|OFF)\)").unwrap();
-        let find_package_re = Regex::new(r"^find_package\((.*?)\)").unwrap();
-        let link_lib_re = Regex::new(r"^target_link_libraries\(sandbox (.*?)_LIBRARIES\)").unwrap();
-        let include_dir_re =
-            Regex::new(r"^target_include_directories\(sandbox PRIVATE (.*?)_INCLUDE_DIRS\)")
-                .unwrap();
-
-        // Iterate over the lines and apply regex matching
-        for line in s.lines() {
-            if let Some(caps) = project_re.captures(line) {
-                project_name = caps[1].to_string();
-            } else if let Some(caps) = cpp_standard_re.captures(line) {
-                cpp_standard = CppStandard::from_str(&caps[1])?;
-            } else if let Some(caps) = export_compile_commands_re.captures(line) {
-                export_compile_commands = caps[1] == *"ON";
-            } else if let Some(caps) = find_package_re.captures(line) {
-                dependencies.push(caps[1].to_string());
-            } else if let Some(caps) = link_lib_re.captures(line) {
-                dependencies.push(caps[1].to_string());
-            } else if let Some(caps) = include_dir_re.captures(line) {
-                dependencies.push(caps[1].to_string());
-            }
-        }
-
-        // Check if all necessary fields were populated
-        if project_name.is_empty() {
-            bail!("Missing project name");
-        }
-
-        Ok(CMake {
-            project_name,
-            cpp_standard,
-            export_compile_commands,
-            dependencies,
-        })
     }
 }

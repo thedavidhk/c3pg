@@ -9,6 +9,8 @@ clap = { version = "4.5.26", features = ["derive"] }
 clap_derive = "4.5.24"
 regex = "1.11.1"
 macros = { path = "./macros" }
+toml = "0.8.19"
+serde = { version = "1.0.217", features = ["derive", "serde_derive"] }
 
 [workspace]
 members = ["macros"]

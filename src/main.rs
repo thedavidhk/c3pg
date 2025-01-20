@@ -1,14 +1,20 @@
 use anyhow::{anyhow, Result};
 use clap::{ArgAction, Parser, Subcommand};
 use cmake::{BuildType, CMake, CppStandard};
-use conan::{Conan, Conanfile};
-use file_wrapper::FileWrapper;
-use std::process::Command;
+use conan::Conan;
+use config::Config;
+use std::{
+    path::PathBuf,
+    process::{Command, Stdio},
+};
+
+use crate::traits::{FromFile, ToFile};
 
 mod cmake;
 mod conan;
+mod config;
 mod dependency;
-mod file_wrapper;
+mod traits;
 
 /// cpppg: Create, manage, and run C++ project sandboxes
 #[derive(Parser, Debug)]
@@ -52,6 +58,7 @@ enum Commands {
         #[arg(long, short)]
         build_type: Option<BuildType>,
     },
+    Config,
 }
 
 fn main() -> Result<()> {
@@ -66,14 +73,17 @@ fn main() -> Result<()> {
         Commands::Add { dependency } => cmd_add(&dependency)?,
         Commands::Build { build_type } => cmd_build(build_type.unwrap_or_default())?,
         Commands::Run { build_type } => cmd_run(build_type.unwrap_or_default())?,
+        Commands::Config => cmd_config()?,
     }
     Ok(())
 }
 
 /// Create a new sandbox directory with a minimal setup (CMakeLists.txt, conanfile.py, main.cpp).
 fn cmd_new(sandbox_name: &str, git: bool, standard: CppStandard) -> Result<()> {
+    let project_path = PathBuf::from(sandbox_name);
+
     // 1. Create the sandbox directory
-    std::fs::create_dir(sandbox_name)?;
+    std::fs::create_dir(&project_path)?;
 
     // 2. Write main.cpp
     let main_cpp_content = r#"#include <iostream>
@@ -85,19 +95,13 @@ int main() {
 "#;
     std::fs::write(format!("{}/main.cpp", sandbox_name), main_cpp_content)?;
 
-    // 3. Write a minimal CMakeLists.txt
-    let cmake = CMake::new(sandbox_name.to_string(), standard, true);
-    std::fs::write(
-        format!("{}/CMakeLists.txt", sandbox_name),
-        cmake.to_string(),
-    )?;
-
-    // 4. Write a minimal conanfile.py
-    let conanfile = Conanfile::new();
-    std::fs::write(
-        format!("{}/conanfile.py", sandbox_name),
-        conanfile.to_string(),
-    )?;
+    // 3. Write minimal config files
+    let mut config = Config::default();
+    config.project.name = sandbox_name.to_string();
+    config.cmake.standard = standard;
+    CMake::from_config(&config).to_file(project_path.join("CMakeLists.txt"))?;
+    Conan::from_config(&config)?.to_file(project_path.join("conanfile.py"))?;
+    config.to_file(project_path.join("cpppg.toml"))?;
 
     if git {
         // Write a .gitignore
@@ -109,7 +113,10 @@ conanfile.py
         std::fs::write(format!("{}/.gitignore", sandbox_name), gitignore_content)?;
 
         // Initialize empty git repo
-        Command::new("git").args(["init", sandbox_name]).status()?;
+        Command::new("git")
+            .args(["init", "-b", "main", sandbox_name])
+            .stdout(Stdio::null())
+            .status()?;
     }
 
     println!("Created new sandbox: {}", sandbox_name);
@@ -118,24 +125,22 @@ conanfile.py
 
 /// Add a Conan dependency to conanfile.py in the current directory.
 fn cmd_add(expr: &str) -> Result<()> {
+    let mut config = Config::from_file("cpppg.toml")?;
+
     // Find dependency
-    let dependency = Conan::new()?
+    let dependency = Conan::from_config(&config)?
         .get_latest_matching_dependency(expr)
         .ok_or(anyhow!("Could not find dependency {} in remotes", expr))?;
 
     // 1. Read and parse existing conanfile.py and CMakeLists.txt
     let conanfile_path = "conanfile.py";
-    let mut conanfile = Conanfile::from_file(conanfile_path)?;
     let cmake_path = "CMakeLists.txt";
-    let mut cmake = CMake::from_file(cmake_path)?;
 
     // 2. Add dependency
-    conanfile.add_dependency(dependency.clone());
-    cmake.add_dependency(&dependency);
-
-    // 3. Write back the file
-    conanfile.to_file(conanfile_path)?;
-    cmake.to_file(cmake_path)?;
+    config.project.add_dependency(dependency.clone());
+    Conan::from_config(&config)?.to_file(conanfile_path)?;
+    CMake::from_config(&config).to_file(cmake_path)?;
+    config.to_file("cpppg.toml")?;
 
     println!("Added dependency '{}'", dependency);
     Ok(())
@@ -143,7 +148,10 @@ fn cmd_add(expr: &str) -> Result<()> {
 
 /// Build the current sandbox project.
 fn cmd_build(build_type: BuildType) -> Result<()> {
-    Conan::new()?.install(".", "build")?;
+    let config = Config::from_file("cpppg.toml")?;
+
+    Conan::from_config(&config)?.install(".", "build")?;
+    CMake::from_config(&config).to_file("CMakeLists.txt")?;
     CMake::build(build_type)?;
 
     println!("Build successful!");
@@ -161,6 +169,14 @@ fn cmd_run(build_type: BuildType) -> Result<()> {
     } else {
         std::process::Command::new(binary_path).status()?;
     }
+
+    Ok(())
+}
+
+fn cmd_config() -> Result<()> {
+    let config = Config::default();
+
+    config.to_file("cpppg.toml")?;
 
     Ok(())
 }
