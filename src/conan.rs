@@ -103,8 +103,7 @@ impl fmt::Display for Conan {
 
         write!(
             f,
-            r#"
-from conan import ConanFile
+            r#"from conan import ConanFile
 
 class SandboxConan(ConanFile):
     name = "sandbox"

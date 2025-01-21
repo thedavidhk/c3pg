@@ -1,7 +1,6 @@
-use std::{fmt::Display, str::FromStr};
-
 use anyhow::Context;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::{fmt, str::FromStr};
 
 use crate::{
     cmake::CppStandard,
@@ -16,7 +15,7 @@ pub struct Config {
     pub conan: ConanConfig,
 }
 
-impl Display for Config {
+impl fmt::Display for Config {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let contents = toml::to_string_pretty(self).expect("Could not serialize Config to toml");
         write!(f, "{}", contents)
@@ -31,14 +30,35 @@ impl FromStr for Config {
     }
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct Project {
+    #[serde(default)]
     pub name: String,
+
     #[serde(
         serialize_with = "serialize_dependencies",
         deserialize_with = "deserialize_dependencies"
     )]
     pub dependencies: Vec<Dependency>,
+
+    #[serde(default, skip_serializing_if = "Project::is_default_cache_dir")]
+    pub cache_dir: String,
+}
+
+impl Project {
+    fn is_default_cache_dir(dir: &String) -> bool {
+        *dir == Self::default().cache_dir
+    }
+}
+
+impl Default for Project {
+    fn default() -> Self {
+        Self {
+            name: "sandbox".to_string(),
+            dependencies: vec![],
+            cache_dir: "build".to_string(),
+        }
+    }
 }
 
 fn serialize_dependencies<S>(deps: &[Dependency], serializer: S) -> Result<S::Ok, S::Error>

@@ -81,17 +81,17 @@ pub struct CMake {
 }
 
 impl CMake {
-    pub fn build(build_type: BuildType) -> Result<()> {
+    pub fn build(build_type: BuildType, build_dir: &str, src_dir: &str) -> Result<()> {
         // Step 1: cmake configure
         let cmake_configure = Command::new("cmake")
             .args([
                 "-B",
-                "build",
+                build_dir,
                 "-DCMAKE_TOOLCHAIN_FILE=conan_toolchain.cmake",
                 format!("-DCMAKE_BUILD_TYPE={}", build_type).as_str(),
                 "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
                 "-S",
-                "build"
+                src_dir,
             ])
             .status()?;
         if !cmake_configure.success() {
