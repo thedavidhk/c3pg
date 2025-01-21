@@ -81,10 +81,6 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn load_config() -> Result<Config> {
-    Config::from_file("cpppg.toml").context("Failed to load cpppg.toml")
-}
-
 /// Create a new sandbox directory with a minimal setup (CMakeLists.txt, conanfile.py, main.cpp).
 fn cmd_new(sandbox_name: &str, git: bool, standard: CppStandard) -> Result<()> {
     // 1. Create the sandbox directory
@@ -135,7 +131,9 @@ conanfile.py
 
 /// Add a Conan dependency to conanfile.py in the current directory.
 fn cmd_add(expr: &str) -> Result<()> {
-    let mut config = load_config()?;
+    let build_dir = PathBuf::from_str("build")?;
+    let config_file = PathBuf::from_str("cpppg.toml")?;
+    let mut config = regenerate_config(&build_dir, &config_file)?;
 
     // Find dependency
     let dependency = Conan::from_config(&config)?
@@ -221,5 +219,8 @@ fn cmd_clean() -> Result<()> {
     if cache_dir.is_dir() {
         fs::remove_dir_all(cache_dir)?;
     }
+
+    println!("Removed all build artifacts");
+
     Ok(())
 }
