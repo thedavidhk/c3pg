@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use clap::{ArgAction, Parser, Subcommand};
 use cmake::{BuildType, CMake, CppStandard};
 use conan::Conan;
@@ -215,6 +215,10 @@ fn cmd_run(build_type: BuildType) -> Result<()> {
 }
 
 fn cmd_clean() -> Result<()> {
+    let config_file = PathBuf::from_str("cpppg.toml")?;
+    if !config_file.exists() {
+        bail!("No cpppg.toml file found.");
+    }
     let cache_dir = PathBuf::from_str("build")?;
     if cache_dir.is_dir() {
         fs::remove_dir_all(cache_dir)?;
