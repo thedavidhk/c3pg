@@ -62,7 +62,11 @@ where
 
 impl Project {
     pub fn add_dependency(&mut self, dep: Dependency) {
-        self.dependencies.push(dep);
+        if let Some(existing) = self.dependencies.iter_mut().find(|d| d.name == dep.name) {
+            *existing = dep;
+        } else {
+            self.dependencies.push(dep);
+        }
     }
 }
 
