@@ -29,7 +29,7 @@ impl Conan {
     }
 
     pub fn install(&self, dir: &str, out_dir: &str) -> Result<()> {
-        let conan_status = Command::new(&self.bin)
+        let output = Command::new(&self.bin)
             .args([
                 "install",
                 "--build=missing",
@@ -37,9 +37,10 @@ impl Conan {
                 out_dir,
                 dir,
             ])
-            .status()?;
-        if !conan_status.success() {
-            bail!("Conan install failed");
+            .output()?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!("Conan install failed: {}", stderr);
         }
         Ok(())
     }

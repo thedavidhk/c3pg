@@ -87,9 +87,11 @@ impl CMake {
             .args([
                 "-B",
                 "build",
-                "-DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake",
+                "-DCMAKE_TOOLCHAIN_FILE=conan_toolchain.cmake",
                 format!("-DCMAKE_BUILD_TYPE={}", build_type).as_str(),
                 "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+                "-S",
+                "build"
             ])
             .status()?;
         if !cmake_configure.success() {
@@ -140,16 +142,17 @@ impl Display for CMake {
         write!(
             f,
             r#"cmake_minimum_required(VERSION 3.15)
+
 project({} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD {})
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS {})
 
-include(${{CMAKE_BINARY_DIR}}/conan_toolchain.cmake)
+include(${{CMAKE_TOOLCHAIN_FILE}})
 {}
 
-add_executable(sandbox main.cpp)
+add_executable(sandbox ${{CMAKE_CURRENT_LIST_DIR}}/../src/main.cpp)
 {}
 {}
 "#,

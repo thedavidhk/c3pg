@@ -16,10 +16,7 @@ pub fn file_wrapper_derive(input: TokenStream) -> TokenStream {
                 let Ok(content) = std::fs::read_to_string(path_ref) else {
                     ::anyhow::bail!("Could not read from {}", path_ref.display());
                 };
-                let Ok(result) = Self::from_str(content.as_str()) else {
-                    ::anyhow::bail!("Could not parse from {}", path_ref.display());
-                };
-                Ok(result)
+                Self::from_str(content.as_str())
             }
         }
     };

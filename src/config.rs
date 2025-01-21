@@ -1,6 +1,6 @@
 use std::{fmt::Display, str::FromStr};
 
-use anyhow::bail;
+use anyhow::Context;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{
@@ -27,10 +27,7 @@ impl FromStr for Config {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let Ok(config) = toml::from_str(s) else {
-            bail!("Could not parse config string to toml");
-        };
-        Ok(config)
+        toml::from_str(s).context("Failed to parse the config string as TOML")
     }
 }
 
