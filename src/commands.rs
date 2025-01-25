@@ -5,13 +5,21 @@ use std::{
     process::{Command, Stdio},
 };
 
-use crate::cmake::{BuildType, CMake, CppStandard};
 use crate::conan::Conan;
 use crate::config::Config;
 use crate::traits::{FromFile, ToFile};
+use crate::{
+    cmake::{BuildType, CMake, CppStandard},
+    command_runner::CommandRunner,
+};
 
 /// Create a new sandbox directory with a minimal setup (CMakeLists.txt, conanfile.py, main.cpp).
-pub fn cmd_new(sandbox_name: &str, git: bool, standard: CppStandard) -> Result<()> {
+pub fn cmd_new(
+    runner: impl CommandRunner,
+    sandbox_name: &str,
+    git: bool,
+    standard: CppStandard,
+) -> Result<()> {
     // 1. Create the sandbox directory
     let project_path = PathBuf::from(sandbox_name);
     let src_dir = project_path.join("src");
@@ -34,7 +42,7 @@ int main() {
     config.project.name = sandbox_name.to_string();
     config.cmake.standard = standard;
     CMake::from_config(&config).to_file(cache_dir.join("CMakeLists.txt"))?;
-    Conan::from_config(&config)?.to_file(cache_dir.join("conanfile.py"))?;
+    Conan::from_config(&runner, &config)?.to_file(cache_dir.join("conanfile.py"))?;
     config.to_file(project_path.join("cpppg.toml"))?;
 
     if git {
@@ -55,12 +63,14 @@ int main() {
 }
 
 /// Add a Conan dependency to conanfile.py in the current directory.
-pub fn cmd_add(expr: &str) -> Result<()> {
-    let mut config = build_config()?;
+pub fn cmd_add(runner: impl CommandRunner, expr: &str) -> Result<()> {
+    let mut config = build_config(&runner)?;
+
+    dbg!(&config);
 
     // Find dependency
-    let dependency = Conan::from_config(&config)?
-        .get_latest_matching_dependency(expr)
+    let dependency = Conan::from_config(&runner, &config)?
+        .get_latest_matching_dependency(&runner, expr)?
         .ok_or(anyhow!("Could not find dependency {} in remotes", expr))?;
 
     // 1. Read and parse existing conanfile.py and CMakeLists.txt
@@ -70,7 +80,7 @@ pub fn cmd_add(expr: &str) -> Result<()> {
 
     // 2. Add dependency
     config.project.add_dependency(dependency.clone());
-    Conan::from_config(&config)?.to_file(conanfile_path)?;
+    Conan::from_config(&runner, &config)?.to_file(conanfile_path)?;
     CMake::from_config(&config).to_file(cmake_path)?;
     config.to_file("cpppg.toml")?;
 
@@ -79,12 +89,12 @@ pub fn cmd_add(expr: &str) -> Result<()> {
 }
 
 /// Build the current sandbox project.
-pub fn cmd_build(build_type: BuildType) -> Result<()> {
-    let config = build_config()?;
+pub fn cmd_build(runner: impl CommandRunner, build_type: BuildType) -> Result<()> {
+    let config = build_config(&runner)?;
     let cache_dir = config.project.cache_dir.as_str();
 
-    Conan::from_config(&config)?.install(cache_dir, cache_dir)?;
-    CMake::build(build_type, cache_dir, cache_dir)?;
+    Conan::from_config(&runner, &config)?.install(&runner, cache_dir, cache_dir)?;
+    CMake::build(&runner, build_type, cache_dir, cache_dir)?;
 
     println!("Build successful!");
     Ok(())
@@ -92,9 +102,9 @@ pub fn cmd_build(build_type: BuildType) -> Result<()> {
 
 /// Run the current sandbox project.
 /// If the binary does not exist or is out of date, rebuild first, then run.
-pub fn cmd_run(build_type: BuildType) -> Result<()> {
-    cmd_build(build_type)?;
-    let config = build_config()?;
+pub fn cmd_run(runner: impl CommandRunner, build_type: BuildType) -> Result<()> {
+    cmd_build(&runner, build_type)?;
+    let config = build_config(&runner)?;
     let cache_dir = PathBuf::from(config.project.cache_dir);
     let binary_name = if cfg!(target_os = "windows") {
         format!("{}.exe", config.project.name)
@@ -110,8 +120,8 @@ pub fn cmd_run(build_type: BuildType) -> Result<()> {
 
 /// Remove artifacts that CPPPG has generated in the past
 /// Checks if cpppg.toml exists to prevent accidental use outside of sandbox project
-pub fn cmd_clean() -> Result<()> {
-    let config = build_config()?;
+pub fn cmd_clean(runner: impl CommandRunner) -> Result<()> {
+    let config = build_config(&runner)?;
 
     let cache_dir = PathBuf::from(config.project.cache_dir);
 
@@ -124,7 +134,7 @@ pub fn cmd_clean() -> Result<()> {
     Ok(())
 }
 
-fn build_config() -> Result<Config> {
+fn build_config(runner: impl CommandRunner) -> Result<Config> {
     let config_file = PathBuf::from("cpppg.toml");
     let config = Config::from_file(&config_file).context("Failed to load cpppg.toml")?;
     let cache_dir = PathBuf::from(&config.project.cache_dir);
@@ -139,10 +149,10 @@ fn build_config() -> Result<Config> {
     if conanfile_path.exists() {
         let conanfile_modified = fs::metadata(&conanfile_path)?.modified()?;
         if conanfile_modified < config_modified {
-            Conan::from_config(&config)?.to_file(&conanfile_path)?;
+            Conan::from_config(&runner, &config)?.to_file(&conanfile_path)?;
         }
     } else {
-        Conan::from_config(&config)?.to_file(&conanfile_path)?;
+        Conan::from_config(&runner, &config)?.to_file(&conanfile_path)?;
     }
 
     if cmake_path.exists() {

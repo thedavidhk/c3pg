@@ -8,7 +8,7 @@ use crate::{
     traits::{FromFile, ToFile},
 };
 
-#[derive(Default, FromFile, ToFile, Serialize, Deserialize)]
+#[derive(Debug, Default, FromFile, ToFile, Serialize, Deserialize)]
 pub struct Config {
     pub project: Project,
     pub cmake: CMakeConfig,
@@ -30,7 +30,7 @@ impl FromStr for Config {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Project {
     #[serde(default)]
     pub name: String,
@@ -41,11 +41,18 @@ pub struct Project {
     )]
     pub dependencies: Vec<Dependency>,
 
-    #[serde(default, skip_serializing_if = "Project::is_default_cache_dir")]
+    #[serde(
+        default = "Project::default_cache_dir",
+        skip_serializing_if = "Project::is_default_cache_dir"
+    )]
     pub cache_dir: String,
 }
 
 impl Project {
+    fn default_cache_dir() -> String {
+        "build".to_string()
+    }
+
     fn is_default_cache_dir(dir: &String) -> bool {
         *dir == Self::default().cache_dir
     }
@@ -56,7 +63,7 @@ impl Default for Project {
         Self {
             name: "sandbox".to_string(),
             dependencies: vec![],
-            cache_dir: "build".to_string(),
+            cache_dir: Self::default_cache_dir(),
         }
     }
 }
@@ -90,7 +97,7 @@ impl Project {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CMakeConfig {
     pub standard: CppStandard,
     pub export_compile_commands: bool,
@@ -105,7 +112,7 @@ impl Default for CMakeConfig {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ConanConfig {
     pub bin: String,
     pub remote: Option<String>,
@@ -117,5 +124,53 @@ impl Default for ConanConfig {
             bin: "conan".to_string(),
             remote: Default::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::Result;
+
+    #[test]
+    fn test_project_default_deserialization() -> Result<()> {
+        let toml_data = r#"
+        name = "example"
+        dependencies = []
+    "#;
+
+        let project: Project = toml::from_str(toml_data)?;
+        assert!(project.cache_dir == "build");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_project_add_dependency() {
+        let mut project = Project::default();
+
+        // Add first dependency
+        project.add_dependency(Dependency {
+            name: "DependencyA".to_string(),
+            ..Default::default()
+        });
+        assert_eq!(project.dependencies.len(), 1);
+        assert_eq!(project.dependencies[0].name, "DependencyA");
+
+        // Add another dependency
+        project.add_dependency(Dependency {
+            name: "DependencyB".to_string(),
+            ..Default::default()
+        });
+        assert_eq!(project.dependencies.len(), 2);
+        assert_eq!(project.dependencies[1].name, "DependencyB");
+
+        // Replace existing dependency
+        project.add_dependency(Dependency {
+            name: "DependencyA".to_string(),
+            ..Default::default()
+        });
+        assert_eq!(project.dependencies.len(), 2); // Should not increase
+        assert_eq!(project.dependencies[0].name, "DependencyA"); // Should be replaced
     }
 }
