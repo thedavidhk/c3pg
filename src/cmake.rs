@@ -159,7 +159,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS {})
 include(${{CMAKE_TOOLCHAIN_FILE}})
 {}
 
-add_executable(sandbox ${{CMAKE_CURRENT_LIST_DIR}}/../src/main.cpp)
+add_executable({} ${{CMAKE_CURRENT_LIST_DIR}}/../src/main.cpp)
 {}
 {}
 "#,
@@ -171,6 +171,7 @@ add_executable(sandbox ${{CMAKE_CURRENT_LIST_DIR}}/../src/main.cpp)
                 "OFF"
             },
             find_packages,
+            self.project_name,
             link_libs,
             include_dirs
         )

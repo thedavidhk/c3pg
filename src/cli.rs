@@ -32,6 +32,11 @@ pub enum Commands {
         /// Name of the Conan dependency (e.g. fmt/10.1.0)
         dependency: String,
     },
+    /// Remove a Conan dependency from the current sandbox (in the current working directory)
+    Remove {
+        /// Name of the Conan dependency (e.g. fmt/10.1.0)
+        dependency: String,
+    },
     /// Build the current sandbox project (in the current working directory)
     Build {
         /// Build type (default: Debug)

@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use std::{
     fs,
     path::PathBuf,
@@ -62,11 +62,9 @@ int main() {
     Ok(())
 }
 
-/// Add a Conan dependency to conanfile.py in the current directory.
+/// Add a Conan dependency to the current project
 pub fn cmd_add(runner: impl CommandRunner, expr: &str) -> Result<()> {
     let mut config = build_config(&runner)?;
-
-    dbg!(&config);
 
     // Find dependency
     let dependency = Conan::from_config(&runner, &config)?
@@ -85,6 +83,35 @@ pub fn cmd_add(runner: impl CommandRunner, expr: &str) -> Result<()> {
     config.to_file("cpppg.toml")?;
 
     println!("Added dependency '{}'", dependency);
+    Ok(())
+}
+
+/// Remove a Conan dependency from the current project
+pub fn cmd_remove(runner: impl CommandRunner, expr: &str) -> Result<()> {
+    let mut config = build_config(&runner)?;
+    let len_before = config.project.dependencies.len();
+    config
+        .project
+        .dependencies
+        .retain(|dep| dep.name.as_str() != expr);
+    let len_after = config.project.dependencies.len();
+
+    let cache_dir = PathBuf::from(&config.project.cache_dir);
+    let conanfile_path = cache_dir.join("conanfile.py");
+    let cmake_path = cache_dir.join("CMakeLists.txt");
+    Conan::from_config(&runner, &config)?.to_file(conanfile_path)?;
+    CMake::from_config(&config).to_file(cmake_path)?;
+    config.to_file("cpppg.toml")?;
+
+    if len_before == len_after {
+        bail!(
+            "Dependency {} not found in project. Not removing anything...",
+            expr
+        );
+    }
+
+    println!("Removed dependency {}", expr);
+
     Ok(())
 }
 
@@ -113,7 +140,14 @@ pub fn cmd_run(runner: impl CommandRunner, build_type: BuildType) -> Result<()> 
     };
 
     let binary_path = cache_dir.join(binary_name);
-    std::process::Command::new(binary_path).status()?;
+    let output = runner
+        .command(binary_path.to_string_lossy())
+        .run()?
+        .expect_success_with_stdout(
+            format!("Could not run binary {}", binary_path.to_string_lossy()).as_str(),
+        )?;
+
+    println!("{}", output);
 
     Ok(())
 }
