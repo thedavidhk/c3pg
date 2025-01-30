@@ -140,9 +140,16 @@ impl Display for CMake {
         };
 
         let find_packages = format_dependencies("find_package(", ")");
-        let link_libs = format_dependencies("target_link_libraries(sandbox ${", "_LIBRARIES})");
+        let link_libs = format_dependencies(
+            format!("target_link_libraries({} ${{", self.project_name).as_str(),
+            "_LIBRARIES})",
+        );
         let include_dirs = format_dependencies(
-            "target_include_directories(sandbox PRIVATE ${",
+            format!(
+                "target_include_directories({} PRIVATE ${{",
+                self.project_name
+            )
+            .as_str(),
             "_INCLUDE_DIRS})",
         );
 
