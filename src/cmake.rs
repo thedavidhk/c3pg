@@ -157,30 +157,45 @@ impl Display for CMake {
             f,
             r#"cmake_minimum_required(VERSION 3.15)
 
-project({} LANGUAGES CXX)
+project({name} LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD {})
+set(CMAKE_CXX_STANDARD {std})
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_EXPORT_COMPILE_COMMANDS {})
+set(CMAKE_EXPORT_COMPILE_COMMANDS {export_cmds})
 
 include(${{CMAKE_TOOLCHAIN_FILE}})
-{}
 
-add_executable({} ${{CMAKE_CURRENT_LIST_DIR}}/../src/main.cpp)
-{}
-{}
+# Collect sources from ../src relative to this CMakeLists.txt
+# Use GLOB_RECURSE for recursive; switch to plain GLOB for only the top-level directory.
+file(GLOB_RECURSE PROJECT_SOURCES CONFIGURE_DEPENDS
+    "${{CMAKE_CURRENT_LIST_DIR}}/../src/*.c"
+    "${{CMAKE_CURRENT_LIST_DIR}}/../src/*.cc"
+    "${{CMAKE_CURRENT_LIST_DIR}}/../src/*.cxx"
+    "${{CMAKE_CURRENT_LIST_DIR}}/../src/*.cpp"
+    "${{CMAKE_CURRENT_LIST_DIR}}/../src/*.m"
+    "${{CMAKE_CURRENT_LIST_DIR}}/../src/*.mm"
+    "${{CMAKE_CURRENT_LIST_DIR}}/../src/*.h"
+    "${{CMAKE_CURRENT_LIST_DIR}}/../src/*.hpp"
+    "${{CMAKE_CURRENT_LIST_DIR}}/../src/*.hh"
+    "${{CMAKE_CURRENT_LIST_DIR}}/../src/*.hxx"
+)
+
+{find_packages}
+
+add_executable({name} ${{PROJECT_SOURCES}})
+{link_libs}
+{include_dirs}
 "#,
-            self.project_name,
-            self.cpp_standard,
-            if self.export_compile_commands {
+            name = self.project_name,
+            std = self.cpp_standard,
+            export_cmds = if self.export_compile_commands {
                 "ON"
             } else {
                 "OFF"
             },
-            find_packages,
-            self.project_name,
-            link_libs,
-            include_dirs
+            find_packages = find_packages,
+            link_libs = link_libs,
+            include_dirs = include_dirs
         )
     }
 }
