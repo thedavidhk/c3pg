@@ -297,10 +297,12 @@ mod tests {
             cmake: CMakeConfig {
                 standard: CppStandard::Cpp17,
                 export_compile_commands: false,
+                silent: false,
             },
             conan: ConanConfig {
                 bin: "custom_conan".to_string(),
                 remote: Some("custom_remote".to_string()),
+                silent: false,
             },
         };
 

@@ -101,6 +101,7 @@ impl Project {
 pub struct CMakeConfig {
     pub standard: CppStandard,
     pub export_compile_commands: bool,
+    pub silent: bool,
 }
 
 impl Default for CMakeConfig {
@@ -108,6 +109,7 @@ impl Default for CMakeConfig {
         Self {
             standard: Default::default(),
             export_compile_commands: true,
+            silent: false,
         }
     }
 }
@@ -116,13 +118,15 @@ impl Default for CMakeConfig {
 pub struct ConanConfig {
     pub bin: String,
     pub remote: Option<String>,
+    pub silent: bool,
 }
 
 impl Default for ConanConfig {
     fn default() -> Self {
         Self {
             bin: "conan".to_string(),
-            remote: Default::default(),
+            remote: None,
+            silent: false,
         }
     }
 }

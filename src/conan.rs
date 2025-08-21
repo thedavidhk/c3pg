@@ -12,6 +12,7 @@ pub struct Conan {
     bin: String,
     remote: String,
     requirements: Vec<Dependency>,
+    silent: bool,
 }
 
 impl Conan {
@@ -24,11 +25,12 @@ impl Conan {
                 .clone()
                 .unwrap_or(Self::get_first_remote(runner, "conan")?),
             requirements: config.project.dependencies.clone(),
+            silent: config.conan.silent,
         })
     }
 
     pub fn install(&self, runner: impl CommandRunner, dir: &str, out_dir: &str) -> Result<()> {
-        runner
+        let output = runner
             .command(&self.bin)
             .args([
                 "install",
@@ -38,7 +40,10 @@ impl Conan {
                 dir,
             ])
             .run()?
-            .expect_success("Conan install failed")?;
+            .expect_success_with_stdout("Conan install failed")?;
+        if !self.silent {
+            println!("{}", output); // TODO: print this dynamically as a stream
+        }
         Ok(())
     }
 
@@ -125,7 +130,7 @@ class SandboxConan(ConanFile):
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{cmake::CppStandard, test_utils::MockCommandRunner};
+    use crate::test_utils::MockCommandRunner;
 
     #[test]
     fn test_conan_from_config_with_remote_fallback() {
@@ -140,14 +145,8 @@ mod tests {
                 }],
                 cache_dir: "build".to_string(),
             },
-            cmake: crate::config::CMakeConfig {
-                standard: CppStandard::Cpp20,
-                export_compile_commands: true,
-            },
-            conan: crate::config::ConanConfig {
-                bin: "conan".to_string(),
-                remote: None, // Missing remote
-            },
+            cmake: crate::config::CMakeConfig::default(),
+            conan: crate::config::ConanConfig::default(),
         };
 
         let conan =
@@ -176,6 +175,7 @@ mod tests {
                 name: "TestDependency".to_string(),
                 ..Default::default()
             }],
+            silent: false,
         };
 
         conan
@@ -207,6 +207,7 @@ mod tests {
             bin: "conan".to_string(),
             remote: "default_remote".to_string(),
             requirements: vec![],
+            silent: false,
         };
 
         let result = conan
@@ -230,6 +231,7 @@ mod tests {
             bin: "conan".to_string(),
             remote: "default_remote".to_string(),
             requirements: vec![],
+            silent: false,
         };
 
         let formatted = conan.to_string();
@@ -252,6 +254,7 @@ mod tests {
                     ..Default::default()
                 },
             ],
+            silent: false,
         };
 
         let formatted = conan.to_string();
