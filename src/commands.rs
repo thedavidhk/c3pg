@@ -120,7 +120,12 @@ pub fn cmd_build(runner: impl CommandRunner, build_type: BuildType) -> Result<()
     let config = build_config(&runner)?;
     let cache_dir = config.project.cache_dir.as_str();
 
-    Conan::from_config(&runner, &config)?.install(&runner, cache_dir, cache_dir)?;
+    Conan::from_config(&runner, &config)?.install(
+        &runner,
+        cache_dir,
+        cache_dir,
+        build_type.clone(),
+    )?;
     CMake::build(&runner, build_type, cache_dir, cache_dir)?;
 
     println!("Build successful!");

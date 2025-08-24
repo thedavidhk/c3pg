@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use heck::ToTitleCase;
 use std::fmt;
 use std::str::FromStr;
 
@@ -11,6 +12,7 @@ use crate::traits::ToFile;
 pub struct Conan {
     bin: String,
     remote: String,
+    project_name: String,
     requirements: Vec<Dependency>,
     silent: bool,
 }
@@ -25,16 +27,25 @@ impl Conan {
                 .clone()
                 .unwrap_or(Self::get_first_remote(runner, "conan")?),
             requirements: config.project.dependencies.clone(),
+            project_name: config.project.name.clone(),
             silent: config.conan.silent,
         })
     }
 
-    pub fn install(&self, runner: impl CommandRunner, dir: &str, out_dir: &str) -> Result<()> {
+    pub fn install(
+        &self,
+        runner: impl CommandRunner,
+        dir: &str,
+        out_dir: &str,
+        build_type: crate::cmake::BuildType, // <-- new param
+    ) -> Result<()> {
         let output = runner
             .command(&self.bin)
             .args([
                 "install",
                 "--build=missing",
+                "-s",
+                &format!("build_type={}", build_type), // <-- match CMake build type
                 "--output-folder",
                 out_dir,
                 dir,
@@ -42,7 +53,7 @@ impl Conan {
             .run()?
             .expect_success_with_stdout("Conan install failed")?;
         if !self.silent {
-            println!("{}", output); // TODO: print this dynamically as a stream
+            println!("{}", output);
         }
         Ok(())
     }
@@ -109,12 +120,15 @@ impl fmt::Display for Conan {
                 .join("\n")
         };
 
+        let class_name = self.project_name.to_title_case();
+
         write!(
             f,
             r#"from conan import ConanFile
 
-class SandboxConan(ConanFile):
-    name = "sandbox"
+
+class {class_name}(ConanFile):
+    name = "{project_name}"
     version = "0.1"
     settings = "os", "compiler", "build_type", "arch"
     generators = "CMakeDeps", "CMakeToolchain"
@@ -122,7 +136,9 @@ class SandboxConan(ConanFile):
     def requirements(self):
 {requirements}
 "#,
-            requirements = requirements
+            requirements = requirements,
+            class_name = class_name,
+            project_name = self.project_name,
         )
     }
 }
@@ -130,7 +146,7 @@ class SandboxConan(ConanFile):
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::MockCommandRunner;
+    use crate::{cmake::BuildType, test_utils::MockCommandRunner};
 
     #[test]
     fn test_conan_from_config_with_remote_fallback() {
@@ -175,11 +191,12 @@ mod tests {
                 name: "TestDependency".to_string(),
                 ..Default::default()
             }],
+            project_name: "example".to_string(),
             silent: false,
         };
 
         conan
-            .install(&mock_runner, "source_dir", "build_dir")
+            .install(&mock_runner, "source_dir", "build_dir", BuildType::Debug)
             .expect("Conan install failed");
 
         let commands = mock_runner.executed_commands();
@@ -190,6 +207,8 @@ mod tests {
             vec![
                 "install",
                 "--build=missing",
+                "-s",
+                "build_type=Debug",
                 "--output-folder",
                 "build_dir",
                 "source_dir",
@@ -206,6 +225,7 @@ mod tests {
         let conan = Conan {
             bin: "conan".to_string(),
             remote: "default_remote".to_string(),
+            project_name: "example".to_string(),
             requirements: vec![],
             silent: false,
         };
@@ -230,6 +250,7 @@ mod tests {
         let conan = Conan {
             bin: "conan".to_string(),
             remote: "default_remote".to_string(),
+            project_name: "example".to_string(),
             requirements: vec![],
             silent: false,
         };
@@ -244,6 +265,7 @@ mod tests {
         let conan = Conan {
             bin: "conan".to_string(),
             remote: "default_remote".to_string(),
+            project_name: "example".to_string(),
             requirements: vec![
                 Dependency {
                     name: "Dep1".to_string(),

@@ -125,37 +125,42 @@ impl CMake {
 
 impl Display for CMake {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let format_dependencies = |prefix: &str, suffix: &str| {
-            self.dependencies
-                .iter()
-                .map(|dep| {
-                    let mut result = String::new();
-                    result.push_str(prefix); // Start with the prefix
-                    result.push_str(&dep.name); // Add the dependency name
-                    result.push_str(suffix); // Add the suffix
-                    result
-                })
-                .collect::<Vec<String>>()
-                .join("\n")
-        };
+        // Lines like: find_package(rs-processing-chain-tools REQUIRED CONFIG)
+        let find_packages = self
+            .dependencies
+            .iter()
+            .map(|dep| format!("find_package({} REQUIRED CONFIG)", dep.name))
+            .collect::<Vec<_>>()
+            .join("\n");
 
-        let find_packages = format_dependencies("find_package(", ")");
-        let link_libs = format_dependencies(
-            format!("target_link_libraries({} ${{", self.project_name).as_str(),
-            "_LIBRARIES})",
-        );
-        let include_dirs = format_dependencies(
-            format!(
-                "target_include_directories({} PRIVATE ${{",
-                self.project_name
-            )
-            .as_str(),
-            "_INCLUDE_DIRS})",
-        );
+        // Lines like: target_link_libraries(<proj> PRIVATE rs-processing-chain-tools::rs-processing-chain-tools)
+        // (One line per dependency keeps it simple and readable.)
+        let link_libs = self
+            .dependencies
+            .iter()
+            .map(|dep| {
+                format!(
+                    "target_link_libraries({} PRIVATE {}::{})",
+                    self.project_name, dep.name, dep.name
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let include_dirs = self
+            .dependencies
+            .iter()
+            .map(|dep| {
+                format!(
+                    "target_include_directories({} PRIVATE ${{{}_INCLUDE_DIRS}})",
+                    self.project_name, dep.name
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
 
         write!(
             f,
-            r#"cmake_minimum_required(VERSION 3.15)
+            r#"cmake_minimum_required(VERSION 3.21)
 
 project({name} LANGUAGES CXX)
 
@@ -163,10 +168,11 @@ set(CMAKE_CXX_STANDARD {std})
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS {export_cmds})
 
-include(${{CMAKE_TOOLCHAIN_FILE}})
+# NOTE: Do NOT include the toolchain here.
+# Pass it during configure:
+# cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=build/generators/conan_toolchain.cmake
 
 # Collect sources from ../src relative to this CMakeLists.txt
-# Use GLOB_RECURSE for recursive; switch to plain GLOB for only the top-level directory.
 file(GLOB_RECURSE PROJECT_SOURCES CONFIGURE_DEPENDS
     "${{CMAKE_CURRENT_LIST_DIR}}/../src/*.c"
     "${{CMAKE_CURRENT_LIST_DIR}}/../src/*.cc"
@@ -183,6 +189,7 @@ file(GLOB_RECURSE PROJECT_SOURCES CONFIGURE_DEPENDS
 {find_packages}
 
 add_executable({name} ${{PROJECT_SOURCES}})
+
 {link_libs}
 {include_dirs}
 "#,
@@ -195,7 +202,6 @@ add_executable({name} ${{PROJECT_SOURCES}})
             },
             find_packages = find_packages,
             link_libs = link_libs,
-            include_dirs = include_dirs
         )
     }
 }
