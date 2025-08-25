@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail, Context, Result};
+use log::{info, warn};
 use std::{
     fs,
     path::PathBuf,
@@ -32,7 +33,7 @@ pub fn cmd_new(
     let main_cpp_content = r#"#include <iostream>
 
 int main() {
-    std::cout << "Hello from C++ sandbox!" << std::endl;
+    std::cout << "Hello from C3PG!" << std::endl;
     return 0;
 }
 "#;
@@ -43,7 +44,7 @@ int main() {
     config.cmake.standard = standard;
     CMake::from_config(&config).to_file(cache_dir.join("CMakeLists.txt"))?;
     Conan::from_config(&runner, &config)?.to_file(cache_dir.join("conanfile.py"))?;
-    config.to_file(project_path.join("cpppg.toml"))?;
+    config.to_file(project_path.join("c3pg.toml"))?;
 
     if git {
         // Write a .gitignore
@@ -58,7 +59,7 @@ int main() {
             .status()?;
     }
 
-    println!("Created new sandbox: {}", sandbox_name);
+    info!("Created new sandbox: {}", sandbox_name);
     Ok(())
 }
 
@@ -80,9 +81,9 @@ pub fn cmd_add(runner: impl CommandRunner, expr: &str) -> Result<()> {
     config.project.add_dependency(dependency.clone());
     Conan::from_config(&runner, &config)?.to_file(conanfile_path)?;
     CMake::from_config(&config).to_file(cmake_path)?;
-    config.to_file("cpppg.toml")?;
+    config.to_file("c3pg.toml")?;
 
-    println!("Added dependency '{}'", dependency);
+    info!("Added dependency '{}'", dependency);
     Ok(())
 }
 
@@ -101,7 +102,7 @@ pub fn cmd_remove(runner: impl CommandRunner, expr: &str) -> Result<()> {
     let cmake_path = cache_dir.join("CMakeLists.txt");
     Conan::from_config(&runner, &config)?.to_file(conanfile_path)?;
     CMake::from_config(&config).to_file(cmake_path)?;
-    config.to_file("cpppg.toml")?;
+    config.to_file("c3pg.toml")?;
 
     if len_before == len_after {
         bail!(
@@ -110,7 +111,7 @@ pub fn cmd_remove(runner: impl CommandRunner, expr: &str) -> Result<()> {
         );
     }
 
-    println!("Removed dependency {}", expr);
+    info!("Removed dependency {}", expr);
 
     Ok(())
 }
@@ -128,7 +129,7 @@ pub fn cmd_build(runner: impl CommandRunner, build_type: BuildType) -> Result<()
     )?;
     CMake::build(&runner, build_type, cache_dir, cache_dir)?;
 
-    println!("Build successful!");
+    info!("Build successful!");
     Ok(())
 }
 
@@ -157,8 +158,8 @@ pub fn cmd_run(runner: impl CommandRunner, build_type: BuildType) -> Result<()> 
     Ok(())
 }
 
-/// Remove artifacts that CPPPG has generated in the past
-/// Checks if cpppg.toml exists to prevent accidental use outside of sandbox project
+/// Remove artifacts that c3pg has generated in the past
+/// Checks if c3pg.toml exists to prevent accidental use outside of sandbox project
 pub fn cmd_clean(runner: impl CommandRunner) -> Result<()> {
     let config = build_config(&runner)?;
 
@@ -168,14 +169,20 @@ pub fn cmd_clean(runner: impl CommandRunner) -> Result<()> {
         fs::remove_dir_all(&cache_dir)?;
     }
 
-    println!("Removed all build artifacts in {}", cache_dir.display());
+    info!("Removed all build artifacts in {}", cache_dir.display());
 
     Ok(())
 }
 
 fn build_config(runner: impl CommandRunner) -> Result<Config> {
-    let config_file = PathBuf::from("cpppg.toml");
-    let config = Config::from_file(&config_file).context("Failed to load cpppg.toml")?;
+    let config_file = PathBuf::from("c3pg.toml");
+    let legacy_file = PathBuf::from("cpppg.toml");
+    let config = match Config::from_file(&config_file) {
+        Ok(cfg) => cfg,
+        Err(_) => {
+            Config::from_file(&legacy_file).context("Failed to load c3pg.toml or cpppg.toml")?
+        }
+    };
     let cache_dir = PathBuf::from(&config.project.cache_dir);
     if !cache_dir.is_dir() {
         fs::create_dir_all(&cache_dir)?;

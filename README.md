@@ -1,18 +1,18 @@
-# cpppg (C++ Playground)
+# c3pg (C++ Playground)
 
-**cpppg (C++ Playground)** is a command-line tool designed to simplify the process of creating,
+*c3pg* (**C** **P**lus **P**lus **P**lay**G**round) is a command-line tool designed to simplify the process of creating,
 managing, and running C++ project sandboxes. Inspired by Rust's `cargo`, it aims to make setting up
 quick C++ test projects as easy and efficient as possible, even when working with external
 dependencies.
 
 While C++ development often involves managing complex build systems like CMake and dependency
-managers like Conan, `cpppg` abstracts these details, allowing you to focus on writing and testing
+managers like Conan, `c3pg` abstracts these details, allowing you to focus on writing and testing
 code. The complexity still exists, but it stays under the hood.
 
 ## Features
 
 - **Quick Project Setup**: Initialize a new C++ project sandbox with a single command.
-- **Unified Configuration**: Use cpppg.toml for all project configuration, similar to Cargo.toml in Rust.
+- **Unified Configuration**: Use c3pg.toml for all project configuration, similar to Cargo.toml in Rust.
 - **Dependency Management**: Easily add Conan dependencies to your project.
 - **Build and Run**: Compile and execute your sandbox projects with minimal effort.
 - **Customizable C++ Standards**: Specify the C++ standard for your projects (e.g., C++20, C++17).
@@ -22,20 +22,20 @@ code. The complexity still exists, but it stays under the hood.
 
 ## Installation
 
-`cpppg` requires the following tools to be installed on your system:
+`c3pg` requires the following tools to be installed on your system:
 
 - [CMake](https://cmake.org/)
 - [Conan (2.x)](https://conan.io/)
 
 Install these tools via your package manager or their respective websites.
 
-To build and run `cpppg`, use the Rust tool chain:
+To build and run `c3pg`, use the Rust tool chain:
 
 ```bash
 cargo install --path .
 ```
 
-This will install the `cpppg` binary locally (by default in `$HOME/.cargo/bin`).
+This will install the `c3pg` binary locally (by default in `$HOME/.cargo/bin`).
 
 ---
 
@@ -44,7 +44,7 @@ This will install the `cpppg` binary locally (by default in `$HOME/.cargo/bin`).
 ### Overview
 
 ```bash
-cpppg [COMMAND] [OPTIONS]
+c3pg [COMMAND] [OPTIONS]
 ```
 
 ### Commands
@@ -54,7 +54,7 @@ cpppg [COMMAND] [OPTIONS]
 Create a new C++ sandbox project.
 
 ```bash
-cpppg new <sandbox_name> [OPTIONS]
+c3pg new <sandbox_name> [OPTIONS]
 ```
 
 Options:
@@ -65,7 +65,7 @@ Options:
 Example:
 
 ```bash
-cpppg new my_sandbox --standard 17
+c3pg new my_sandbox --standard 17
 ```
 
 #### `add`
@@ -73,21 +73,21 @@ cpppg new my_sandbox --standard 17
 Add a dependency to the current project.
 
 ```bash
-cpppg add <dependency>
+c3pg add <dependency>
 ```
 
 Example:
 
 ```bash
-cpppg add fmt
+c3pg add fmt
 ```
 
-`cpppg` looks for the latest version in the default Conan remote by default. Optionally, we can
+`c3pg` looks for the latest version in the default Conan remote by default. Optionally, we can
 specify a version and/or a user/channel:
 
 ````bash
-cpppg add fmt/10.0.1
-cpppg add fmt/10.0.1@some_user/some_channel
+c3pg add fmt/10.0.1
+c3pg add fmt/10.0.1@some_user/some_channel
 ```bash
 `
 ````
@@ -97,7 +97,7 @@ cpppg add fmt/10.0.1@some_user/some_channel
 Build the current sandbox project.
 
 ```bash
-cpppg build [OPTIONS]
+c3pg build [OPTIONS]
 ```
 
 Options:
@@ -108,7 +108,7 @@ Options:
 Example:
 
 ```bash
-cpppg build -b Release
+c3pg build -b Release
 ```
 
 #### `run`
@@ -116,7 +116,7 @@ cpppg build -b Release
 Run the current sandbox project (builds first if necessary).
 
 ```bash
-cpppg run [OPTIONS]
+c3pg run [OPTIONS]
 ```
 
 Options:
@@ -127,7 +127,7 @@ Options:
 Example:
 
 ```bash
-cpppg run
+c3pg run
 ```
 
 ---
@@ -136,9 +136,9 @@ cpppg run
 
 ### Project Structure
 
-When you create a new sandbox, `cpppg` generates the following files:
+When you create a new sandbox, `c3pg` generates the following files:
 
-- `cpppg.toml`: A unified configuration file for the project. This file includes all project
+- `c3pg.toml`: A unified configuration file for the project. This file includes all project
   settings, such as dependencies, the C++ standard, and Conan/CMake configurations.
 - `main.cpp`: A simple "Hello World" program.
 - `build/` directory: Contains all generated build files, including:
@@ -151,13 +151,13 @@ When you create a new sandbox, `cpppg` generates the following files:
 1. Create a new project:
 
 ```bash
-cpppg new my_project
+c3pg new my_project
 ```
 
 2. Add a dependency:
 
 ```bash
-cpppg add fmt
+c3pg add fmt
 ```
 
 3. Edit the generated `main.cpp` file, e.g.:
@@ -173,16 +173,16 @@ int main() {
 3. Build and run the project:
 
 ```bash
-cpppg run
+c3pg run
 ```
 
 ---
 
 ## Configuration
 
-### `cpppg.toml`
+### `c3pg.toml`
 
-The `cpppg.toml` file is the central configuration file for your project. Here's an example:
+The `c3pg.toml` file is the central configuration file for your project. Here's an example:
 
 ```toml
 [project]
@@ -208,8 +208,8 @@ remote = "default"
 
 ## Future Plans
 
-While `cpppg` already simplifies sandbox creation and management, future iterations might include:
+While `c3pg` already simplifies sandbox creation and management, future iterations might include:
 
 - Built-in templates for common project setups.
 - Improved integration with package managers and remote repositories.
-- Additional customization options for `cpppg.toml`.
+- Additional customization options for `c3pg.toml`.

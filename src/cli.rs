@@ -2,9 +2,9 @@ use clap::{ArgAction, Parser, Subcommand};
 
 use crate::cmake::{BuildType, CppStandard};
 
-/// cpppg: Create, manage, and run C++ project sandboxes
+/// c3pg: Create, manage, and run C++ project sandboxes
 #[derive(Parser, Debug)]
-#[command(name = "cpppg")]
+#[command(name = "c3pg")]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
     #[command(subcommand)]
@@ -49,6 +49,6 @@ pub enum Commands {
         #[arg(long, short)]
         build_type: Option<BuildType>,
     },
-    /// Remove artifacts that CPPPG has generated in the past
+    /// Remove artifacts that c3pg has generated in the past
     Clean,
 }
