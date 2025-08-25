@@ -40,11 +40,6 @@ impl<R: CommandRunner> CommandBuilder<R> {
         }
     }
 
-    // pub fn arg(mut self, arg: impl Into<String>) -> Self {
-    //     self.args.push(arg.into());
-    //     self
-    // }
-
     pub fn args<I, S>(mut self, args: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -80,7 +75,12 @@ impl CommandResult {
     /// Returns the `stdout` if the command succeeded, or an error otherwise.
     pub fn expect_success_with_stdout(self, cmd: &str) -> anyhow::Result<String> {
         if self.success {
-            Ok(self.stdout)
+            let stderr = if self.stderr.is_empty() {
+                String::new()
+            } else {
+                format!("{}\n", self.stderr)
+            };
+            Ok(format!("{}\n{}", self.stdout, stderr))
         } else {
             anyhow::bail!("Command `{}` failed: {}", cmd, self.stderr);
         }
@@ -136,7 +136,11 @@ mod tests {
     #[test]
     fn test_command_builder_failure() {
         let runner = MockRunner;
-        let result = runner.command("fail").run().unwrap().expect_success("This should return an error");
+        let result = runner
+            .command("fail")
+            .run()
+            .unwrap()
+            .expect_success("This should return an error");
 
         assert!(result.is_err());
         let error = format!("{}", result.unwrap_err());
