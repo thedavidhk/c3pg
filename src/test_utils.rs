@@ -1,4 +1,4 @@
-use crate::command_runner::{CommandResult, CommandRunner};
+use crate::command_runner::{CommandResult, CommandRunner, StreamMode};
 use std::cell::RefCell;
 
 pub struct MockCommandRunner {
@@ -29,7 +29,7 @@ impl Default for MockCommandRunner {
 }
 
 impl CommandRunner for MockCommandRunner {
-    fn execute(&self, cmd: &str, args: &[&str]) -> anyhow::Result<CommandResult> {
+    fn execute(&self, cmd: &str, args: &[&str], _mode: StreamMode) -> anyhow::Result<CommandResult> {
         self.executed_commands.borrow_mut().push((
             cmd.to_string(),
             args.iter().map(|&s| s.to_string()).collect(),

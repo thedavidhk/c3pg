@@ -1,9 +1,10 @@
 use anyhow::{anyhow, Result};
 use heck::ToTitleCase;
+use log::LevelFilter;
 use std::fmt;
 use std::str::FromStr;
 
-use crate::command_runner::CommandRunner;
+use crate::command_runner::{tool_stream_mode, CommandRunner};
 use crate::config::Config;
 use crate::dependency::Dependency;
 use crate::traits::ToFile;
@@ -14,7 +15,6 @@ pub struct Conan {
     remote: String,
     project_name: String,
     requirements: Vec<Dependency>,
-    silent: bool,
 }
 
 impl Conan {
@@ -28,33 +28,36 @@ impl Conan {
                 .unwrap_or(Self::get_first_remote(runner, "conan")?),
             requirements: config.project.dependencies.clone(),
             project_name: config.project.name.clone(),
-            silent: config.conan.silent,
         })
     }
 
     pub fn install(
         &self,
-        runner: impl CommandRunner,
+        runner: &impl CommandRunner,
         dir: &str,
         out_dir: &str,
-        build_type: crate::cmake::BuildType, // <-- new param
+        build_type: crate::cmake::BuildType,
+        lvl: LevelFilter,
     ) -> Result<()> {
-        let output = runner
+        let mut args: Vec<String> = vec![
+            "install".into(),
+            "--build=missing".into(),
+            "-s".into(),
+            format!("build_type={}", build_type),
+            "--output-folder".into(),
+            out_dir.into(),
+            dir.into(),
+        ];
+
+        args.extend(conan_verbosity_args(lvl).iter().map(|s| s.to_string()));
+
+        runner
             .command(&self.bin)
-            .args([
-                "install",
-                "--build=missing",
-                "-s",
-                &format!("build_type={}", build_type), // <-- match CMake build type
-                "--output-folder",
-                out_dir,
-                dir,
-            ])
+            .args(args.iter().map(|s| s.as_str()))
+            .stream_mode(tool_stream_mode(lvl))
             .run()?
-            .expect_success_with_stdout("Conan install failed")?;
-        if !self.silent {
-            println!("{}", output);
-        }
+            .expect_success("Conan install failed")?;
+
         Ok(())
     }
 
@@ -78,7 +81,7 @@ impl Conan {
             .lines()
             .filter_map(|line| Dependency::from_str(line).ok())
             .filter(|entry| entry.matches(&dependency))
-            .last();
+            .next_back();
         Ok(matching_versions)
     }
 
@@ -143,6 +146,17 @@ class {class_name}(ConanFile):
     }
 }
 
+fn conan_verbosity_args(lvl: LevelFilter) -> &'static [&'static str] {
+    match lvl {
+        LevelFilter::Off => &["-vquiet"],
+        LevelFilter::Error => &["-vquiet"],
+        LevelFilter::Warn => &["-verror"],
+        LevelFilter::Info => &["-vwarning"],
+        LevelFilter::Debug => &["-vstatus"],
+        LevelFilter::Trace => &["-v"],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,11 +206,16 @@ mod tests {
                 ..Default::default()
             }],
             project_name: "example".to_string(),
-            silent: false,
         };
 
         conan
-            .install(&mock_runner, "source_dir", "build_dir", BuildType::Debug)
+            .install(
+                &mock_runner,
+                "source_dir",
+                "build_dir",
+                BuildType::Debug,
+                LevelFilter::Info,
+            )
             .expect("Conan install failed");
 
         let commands = mock_runner.executed_commands();
@@ -212,6 +231,7 @@ mod tests {
                 "--output-folder",
                 "build_dir",
                 "source_dir",
+                "-vwarning"
             ]
         );
     }
@@ -227,7 +247,6 @@ mod tests {
             remote: "default_remote".to_string(),
             project_name: "example".to_string(),
             requirements: vec![],
-            silent: false,
         };
 
         let result = conan
@@ -252,7 +271,6 @@ mod tests {
             remote: "default_remote".to_string(),
             project_name: "example".to_string(),
             requirements: vec![],
-            silent: false,
         };
 
         let formatted = conan.to_string();
@@ -276,7 +294,6 @@ mod tests {
                     ..Default::default()
                 },
             ],
-            silent: false,
         };
 
         let formatted = conan.to_string();

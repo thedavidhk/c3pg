@@ -1,9 +1,13 @@
 use anyhow::{bail, Result};
+use log::LevelFilter;
 use serde::{Deserialize, Serialize};
 use std::{fmt::Display, str::FromStr};
 
 use crate::{
-    command_runner::CommandRunner, config::Config, dependency::Dependency, traits::ToFile,
+    command_runner::{tool_stream_mode, CommandRunner},
+    config::Config,
+    dependency::Dependency,
+    traits::ToFile,
 };
 
 #[derive(Debug, Default, Clone)]
@@ -84,32 +88,50 @@ pub struct CMake {
 
 impl CMake {
     pub fn build(
-        command_runner: impl CommandRunner,
+        command_runner: &impl CommandRunner,
         build_type: BuildType,
         build_dir: &str,
         src_dir: &str,
+        lvl: LevelFilter,
     ) -> Result<()> {
-        // Step 1: cmake configure
-        let cmake_configure = command_runner
-            .command("cmake")
-            .args([
-                "-B",
-                build_dir,
-                "-DCMAKE_TOOLCHAIN_FILE=conan_toolchain.cmake",
-                format!("-DCMAKE_BUILD_TYPE={}", build_type).as_str(),
-                "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
-                "-S",
-                src_dir,
-            ])
-            .run()?;
-        cmake_configure.expect_success("CMake configure failed")?;
+        // ---- Step 1: cmake configure ----
+        let mut conf_args = vec![
+            "-B".into(),
+            build_dir.into(),
+            "-DCMAKE_TOOLCHAIN_FILE=conan_toolchain.cmake".into(),
+            format!("-DCMAKE_BUILD_TYPE={}", build_type),
+            "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON".into(),
+            "-S".into(),
+            src_dir.into(),
+        ];
+        conf_args.extend(
+            cmake_configure_verbosity_args(lvl)
+                .iter()
+                .map(|s| s.to_string()),
+        );
 
-        // Step 2: cmake --build
-        let cmake_build = command_runner
+        command_runner
             .command("cmake")
-            .args(["--build", "build"])
-            .run()?;
-        cmake_build.expect_success("CMake build failed")?;
+            .args(conf_args.iter().map(|s| s.as_str()))
+            .stream_mode(tool_stream_mode(lvl))
+            .run()?
+            .expect_success("Failed to configure with cmake")?;
+
+        // ---- Step 2: cmake --build ----
+        let mut build_args = vec!["--build".into(), build_dir.into()];
+        build_args.extend(
+            cmake_build_verbosity_args(lvl)
+                .iter()
+                .map(|s| s.to_string()),
+        );
+
+        command_runner
+            .command("cmake")
+            .args(build_args.iter().map(|s| s.as_str()))
+            .stream_mode(tool_stream_mode(lvl))
+            .run()?
+            .expect_success("Failed to build with cmake")?;
+
         Ok(())
     }
 
@@ -133,8 +155,6 @@ impl Display for CMake {
             .collect::<Vec<_>>()
             .join("\n");
 
-        // Lines like: target_link_libraries(<proj> PRIVATE rs-processing-chain-tools::rs-processing-chain-tools)
-        // (One line per dependency keeps it simple and readable.)
         let link_libs = self
             .dependencies
             .iter()
@@ -146,6 +166,7 @@ impl Display for CMake {
             })
             .collect::<Vec<_>>()
             .join("\n");
+
         let include_dirs = self
             .dependencies
             .iter()
@@ -206,6 +227,25 @@ add_executable({name} ${{PROJECT_SOURCES}})
     }
 }
 
+fn cmake_configure_verbosity_args(lvl: LevelFilter) -> &'static [&'static str] {
+    // CMake >=3.15 supports --log-level: ERROR|WARNING|NOTICE|STATUS|VERBOSE|DEBUG|TRACE
+    match lvl {
+        LevelFilter::Off | LevelFilter::Error => &["--log-level", "ERROR"],
+        LevelFilter::Warn => &["--log-level", "ERROR"],
+        LevelFilter::Info => &["--log-level", "WARNING"],
+        LevelFilter::Debug => &["--log-level", "STATUS"],
+        LevelFilter::Trace => &["--log-level", "VERBOSE"],
+    }
+}
+
+fn cmake_build_verbosity_args(lvl: LevelFilter) -> &'static [&'static str] {
+    // Forward -v to the underlying build tool at higher levels
+    match lvl {
+        LevelFilter::Debug | LevelFilter::Trace => &["--", "-v"], // Ninja/Make verbose
+        _ => &[],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,7 +256,13 @@ mod tests {
         let mock_runner = MockCommandRunner::default();
 
         // Call the build function
-        let result = CMake::build(&mock_runner, BuildType::Debug, "build_dir", "src_dir");
+        let result = CMake::build(
+            &mock_runner,
+            BuildType::Debug,
+            "build_dir",
+            "src_dir",
+            LevelFilter::Info,
+        );
 
         // Assert that the build completed successfully
         assert!(result.is_ok());
@@ -238,13 +284,15 @@ mod tests {
                 "-DCMAKE_BUILD_TYPE=Debug",
                 "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
                 "-S",
-                "src_dir"
+                "src_dir",
+                "--log-level",
+                "WARNING"
             ]
         );
 
         // Validate the cmake build command
         assert_eq!(commands[1].0, "cmake");
-        assert_eq!(commands[1].1, vec!["--build", "build"]);
+        assert_eq!(commands[1].1, vec!["--build", "build_dir"]);
     }
 
     #[test]
@@ -257,6 +305,7 @@ mod tests {
             BuildType::Release,
             "release_build_dir",
             "src_dir",
+            LevelFilter::Info,
         );
 
         // Assert that the build completed successfully
@@ -273,7 +322,7 @@ mod tests {
 
         // Validate the build command
         assert_eq!(commands[1].0, "cmake");
-        assert_eq!(commands[1].1, vec!["--build", "build"]);
+        assert_eq!(commands[1].1, vec!["--build", "release_build_dir"]);
     }
 
     #[test]

@@ -1,18 +1,18 @@
 use anyhow::{anyhow, bail, Context, Result};
-use log::{info, warn};
+use log::{info, LevelFilter};
 use std::{
     fs,
     path::PathBuf,
     process::{Command, Stdio},
 };
 
-use crate::conan::Conan;
 use crate::config::Config;
 use crate::traits::{FromFile, ToFile};
 use crate::{
     cmake::{BuildType, CMake, CppStandard},
     command_runner::CommandRunner,
 };
+use crate::{command_runner::binary_stream_mode, conan::Conan};
 
 /// Create a new sandbox directory with a minimal setup (CMakeLists.txt, conanfile.py, main.cpp).
 pub fn cmd_new(
@@ -117,7 +117,11 @@ pub fn cmd_remove(runner: impl CommandRunner, expr: &str) -> Result<()> {
 }
 
 /// Build the current sandbox project.
-pub fn cmd_build(runner: impl CommandRunner, build_type: BuildType) -> Result<()> {
+pub fn cmd_build(
+    runner: impl CommandRunner,
+    build_type: BuildType,
+    lvl: LevelFilter,
+) -> Result<()> {
     let config = build_config(&runner)?;
     let cache_dir = config.project.cache_dir.as_str();
 
@@ -126,17 +130,18 @@ pub fn cmd_build(runner: impl CommandRunner, build_type: BuildType) -> Result<()
         cache_dir,
         cache_dir,
         build_type.clone(),
+        lvl,
     )?;
-    CMake::build(&runner, build_type, cache_dir, cache_dir)?;
+    CMake::build(&runner, build_type, cache_dir, cache_dir, lvl)?;
 
-    info!("Build successful!");
+    info!("Build successful!\n");
     Ok(())
 }
 
 /// Run the current sandbox project.
 /// If the binary does not exist or is out of date, rebuild first, then run.
-pub fn cmd_run(runner: impl CommandRunner, build_type: BuildType) -> Result<()> {
-    cmd_build(&runner, build_type)?;
+pub fn cmd_run(runner: impl CommandRunner, build_type: BuildType, lvl: LevelFilter) -> Result<()> {
+    cmd_build(&runner, build_type, lvl)?;
     let config = build_config(&runner)?;
     let cache_dir = PathBuf::from(config.project.cache_dir);
     let binary_name = if cfg!(target_os = "windows") {
@@ -146,14 +151,13 @@ pub fn cmd_run(runner: impl CommandRunner, build_type: BuildType) -> Result<()> 
     };
 
     let binary_path = cache_dir.join(binary_name);
-    let output = runner
+    runner
         .command(binary_path.to_string_lossy())
+        .stream_mode(binary_stream_mode(lvl))
         .run()?
         .expect_success_with_stdout(
             format!("Could not run binary {}", binary_path.to_string_lossy()).as_str(),
         )?;
-
-    println!("{}", output);
 
     Ok(())
 }

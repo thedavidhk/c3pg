@@ -1,26 +1,67 @@
-pub trait CommandRunner: Sized {
-    /// Executes a command with the specified arguments and returns a `CommandOutput`.
-    /// This is intended to be used internally by `CommandBuilder`.
-    fn execute(&self, cmd: &str, args: &[&str]) -> anyhow::Result<CommandResult>;
+use log::LevelFilter;
 
-    /// Creates a `CommandBuilder` for constructing and running a command.
+#[derive(Copy, Clone, Debug)]
+pub enum StreamMode {
+    /// Buffer stdout/stderr; no live output.
+    Buffer,
+    /// Stream selectively; still buffer everything for the result.
+    Stream {
+        stream_stdout: bool,
+        stream_stderr: bool,
+        /// If true, prefix live lines with `cmd:` (handy at -vv).
+        prefix: bool,
+    },
+}
+
+/// For external tools (cmake/conan):
+/// -q / Error:    only show errors (stderr)
+/// Info/Warn:     only show warnings/errors (stderr)
+/// -v / -vv:      show stdout + stderr (prefix at -vv)
+pub fn tool_stream_mode(level: LevelFilter) -> StreamMode {
+    match level {
+        LevelFilter::Off | LevelFilter::Error => StreamMode::Stream {
+            stream_stdout: false,
+            stream_stderr: true,
+            prefix: false,
+        },
+        LevelFilter::Warn | LevelFilter::Info => StreamMode::Stream {
+            stream_stdout: false,
+            stream_stderr: true,
+            prefix: false,
+        },
+        LevelFilter::Debug => StreamMode::Stream {
+            stream_stdout: true,
+            stream_stderr: true,
+            prefix: false,
+        },
+        LevelFilter::Trace => StreamMode::Stream {
+            stream_stdout: true,
+            stream_stderr: true,
+            prefix: true,
+        },
+    }
+}
+
+/// For the user binary (cmd_run):
+/// Default: show everything live.
+/// -q / Error / Warn: suppress live output (buffer; show only on failure).
+pub fn binary_stream_mode(level: LevelFilter) -> StreamMode {
+    match level {
+        LevelFilter::Off | LevelFilter::Error | LevelFilter::Warn => StreamMode::Buffer,
+        _ => StreamMode::Stream {
+            stream_stdout: true,
+            stream_stderr: true,
+            prefix: false, // keep it clean for app output
+        },
+    }
+}
+
+pub trait CommandRunner: Sized {
+    fn execute(&self, cmd: &str, args: &[&str], _mode: StreamMode)
+        -> anyhow::Result<CommandResult>;
+
     fn command(&self, cmd: impl Into<String>) -> CommandBuilder<&Self> {
         CommandBuilder::new(self, cmd)
-    }
-}
-
-impl<T: CommandRunner> CommandRunner for &T {
-    fn execute(&self, cmd: &str, args: &[&str]) -> anyhow::Result<CommandResult> {
-        (*self).execute(cmd, args)
-    }
-}
-
-pub struct SystemCommandRunner;
-
-impl CommandRunner for SystemCommandRunner {
-    fn execute(&self, cmd: &str, args: &[&str]) -> anyhow::Result<CommandResult> {
-        let output = std::process::Command::new(cmd).args(args).output()?;
-        Ok(CommandResult::from_std(output))
     }
 }
 
@@ -29,6 +70,7 @@ pub struct CommandBuilder<R: CommandRunner> {
     runner: R,
     cmd: String,
     args: Vec<String>,
+    mode: StreamMode,
 }
 
 impl<R: CommandRunner> CommandBuilder<R> {
@@ -37,6 +79,7 @@ impl<R: CommandRunner> CommandBuilder<R> {
             runner,
             cmd: cmd.into(),
             args: Vec::new(),
+            mode: StreamMode::Buffer,
         }
     }
 
@@ -45,17 +88,135 @@ impl<R: CommandRunner> CommandBuilder<R> {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        self.args.extend(args.into_iter().map(|arg| arg.into()));
+        self.args.extend(args.into_iter().map(Into::into));
+        self
+    }
+
+    pub fn stream_mode(mut self, mode: StreamMode) -> Self {
+        self.mode = mode;
         self
     }
 
     pub fn run(self) -> anyhow::Result<CommandResult> {
         let args: Vec<_> = self.args.iter().map(String::as_str).collect();
-        self.runner.execute(&self.cmd, &args)
+        self.runner.execute(&self.cmd, &args, self.mode)
     }
 }
 
-#[derive(Debug)]
+pub struct SystemCommandRunner;
+
+impl CommandRunner for SystemCommandRunner {
+    fn execute(&self, cmd: &str, args: &[&str], mode: StreamMode) -> anyhow::Result<CommandResult> {
+        use std::io::{BufRead, BufReader, Write};
+        use std::process::{Command, Stdio};
+        use std::sync::{Arc, Mutex};
+        use std::thread;
+
+        let mut child = Command::new(cmd)
+            .args(args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+
+        let stdout_pipe = child.stdout.take();
+        let stderr_pipe = child.stderr.take();
+
+        let out_buf = Arc::new(Mutex::new(String::new()));
+        let err_buf = Arc::new(Mutex::new(String::new()));
+
+        let (stream_stdout, stream_stderr, prefix) = match mode {
+            StreamMode::Buffer => (false, false, false),
+            StreamMode::Stream {
+                stream_stdout,
+                stream_stderr,
+                prefix,
+            } => (stream_stdout, stream_stderr, prefix),
+        };
+
+        let cmd_prefix = if prefix {
+            Some(format!("{cmd}: "))
+        } else {
+            None
+        };
+
+        // Reader helper
+        fn spawn_reader<R: std::io::Read + Send + 'static>(
+            pipe: Option<R>,
+            is_stdout: bool,
+            buf: Arc<Mutex<String>>,
+            stream: bool,
+            cmd_prefix: Option<String>,
+        ) -> thread::JoinHandle<()> {
+            thread::spawn(move || {
+                if let Some(pipe) = pipe {
+                    let reader = BufReader::new(pipe);
+                    for line in reader.lines().map_while(Result::ok) {
+                        // Buffer everything
+                        {
+                            let mut b = buf.lock().unwrap();
+                            b.push_str(&line);
+                            b.push('\n');
+                        }
+
+                        // Optionally stream live
+                        if stream {
+                            if is_stdout {
+                                if let Some(ref p) = cmd_prefix {
+                                    print!("{p}");
+                                }
+                                println!("{line}");
+                                let _ = std::io::stdout().flush();
+                            } else {
+                                if let Some(ref p) = cmd_prefix {
+                                    eprint!("{p}");
+                                }
+                                eprintln!("{line}");
+                                let _ = std::io::stderr().flush();
+                            }
+                        }
+                    }
+                }
+            })
+        }
+
+        let t_out = spawn_reader(
+            stdout_pipe,
+            true,
+            out_buf.clone(),
+            stream_stdout,
+            cmd_prefix.clone(),
+        );
+        let t_err = spawn_reader(
+            stderr_pipe,
+            false,
+            err_buf.clone(),
+            stream_stderr,
+            cmd_prefix,
+        );
+
+        let status = child.wait()?;
+        // Wait for readers to finish
+        let _ = t_out.join();
+        let _ = t_err.join();
+
+        let stdout = Arc::try_unwrap(out_buf).unwrap().into_inner().unwrap();
+        let stderr = Arc::try_unwrap(err_buf).unwrap().into_inner().unwrap();
+
+        Ok(CommandResult {
+            stdout,
+            stderr,
+            success: status.success(),
+        })
+    }
+}
+
+impl<T: CommandRunner + Sized> CommandRunner for &T {
+    fn execute(&self, cmd: &str, args: &[&str], mode: StreamMode) -> anyhow::Result<CommandResult> {
+        (*self).execute(cmd, args, mode)
+    }
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct CommandResult {
     pub stdout: String,
     pub stderr: String,
@@ -63,24 +224,10 @@ pub struct CommandResult {
 }
 
 impl CommandResult {
-    /// Create a `CommandOutput` from `std::process::Output`.
-    pub fn from_std(output: std::process::Output) -> Self {
-        Self {
-            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-            success: output.status.success(),
-        }
-    }
-
     /// Returns the `stdout` if the command succeeded, or an error otherwise.
     pub fn expect_success_with_stdout(self, cmd: &str) -> anyhow::Result<String> {
         if self.success {
-            let stderr = if self.stderr.is_empty() {
-                String::new()
-            } else {
-                format!("{}\n", self.stderr)
-            };
-            Ok(format!("{}\n{}", self.stdout, stderr))
+            Ok(self.stdout)
         } else {
             anyhow::bail!("Command `{}` failed: {}", cmd, self.stderr);
         }
@@ -99,11 +246,29 @@ impl CommandResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
 
-    struct MockRunner;
+    #[derive(Default)]
+    struct MockRunner {
+        // Capture what was invoked
+        last_cmd: RefCell<Option<String>>,
+        last_args: RefCell<Vec<String>>,
+        last_mode: RefCell<Option<StreamMode>>,
+    }
 
     impl CommandRunner for MockRunner {
-        fn execute(&self, cmd: &str, args: &[&str]) -> anyhow::Result<CommandResult> {
+        fn execute(
+            &self,
+            cmd: &str,
+            args: &[&str],
+            mode: StreamMode,
+        ) -> anyhow::Result<CommandResult> {
+            // Record invocation for the verbosity/mode tests
+            *self.last_cmd.borrow_mut() = Some(cmd.to_string());
+            *self.last_args.borrow_mut() = args.iter().map(|s| s.to_string()).collect();
+            *self.last_mode.borrow_mut() = Some(mode);
+
+            // Simulate real command behavior expected by the tests
             match cmd {
                 "echo" => Ok(CommandResult {
                     stdout: args.join(" "),
@@ -115,14 +280,39 @@ mod tests {
                     stderr: "Something went wrong!".to_string(),
                     success: false,
                 }),
+                // success stubs for verbosity mapping tests
+                "conan" => Ok(CommandResult {
+                    stdout: format!("conan {}", args.join(" ")),
+                    stderr: String::new(),
+                    success: true,
+                }),
+                "cmake" => {
+                    let is_build = args.contains(&"--build");
+                    let stdout = if is_build {
+                        "Build finished".to_string()
+                    } else {
+                        // mimic common configure chatter (doesn't matter; tests only check mode)
+                        "-- Configuring done\n-- Generating done\n-- Build files have been written to: /tmp/mock".to_string()
+                    };
+                    Ok(CommandResult {
+                        stdout,
+                        stderr: String::new(),
+                        success: true,
+                    })
+                }
+                "invalid_command" => anyhow::bail!("Unknown command"),
                 _ => anyhow::bail!("Unknown command"),
             }
+        }
+
+        fn command(&self, cmd: impl Into<String>) -> CommandBuilder<&Self> {
+            CommandBuilder::new(self, cmd)
         }
     }
 
     #[test]
     fn test_command_builder_success() {
-        let runner = MockRunner;
+        let runner = MockRunner::default();
         let result = runner
             .command("echo")
             .args(["Hello", "world!"])
@@ -135,7 +325,7 @@ mod tests {
 
     #[test]
     fn test_command_builder_failure() {
-        let runner = MockRunner;
+        let runner = MockRunner::default();
         let result = runner
             .command("fail")
             .run()
@@ -149,7 +339,7 @@ mod tests {
 
     #[test]
     fn test_command_invalid() {
-        let runner = MockRunner;
+        let runner = MockRunner::default();
         let result = runner.command("invalid_command").run();
 
         assert!(result.is_err());

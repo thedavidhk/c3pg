@@ -1,4 +1,5 @@
 use clap::{ArgAction, Parser, Subcommand};
+use clap_verbosity_flag::{InfoLevel, Verbosity};
 
 use crate::cmake::{BuildType, CppStandard};
 
@@ -9,6 +10,8 @@ use crate::cmake::{BuildType, CppStandard};
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
+    #[command(flatten)]
+    pub verbose: Verbosity<InfoLevel>,
 }
 
 /// List of subcommands.
