@@ -6,7 +6,6 @@ use std::{fmt::Display, str::FromStr};
 use crate::{
     command_runner::{tool_stream_mode, CommandRunner},
     config::Config,
-    dependency::Dependency,
     traits::ToFile,
 };
 
@@ -83,7 +82,6 @@ pub struct CMake {
     pub project_name: String,
     pub cpp_standard: CppStandard,
     pub export_compile_commands: bool,
-    dependencies: Vec<Dependency>,
 }
 
 impl CMake {
@@ -140,7 +138,6 @@ impl CMake {
             project_name: config.project.name.clone(),
             cpp_standard: config.cmake.standard.clone(),
             export_compile_commands: config.cmake.export_compile_commands,
-            dependencies: config.project.dependencies.clone(),
         }
     }
 }
@@ -148,36 +145,6 @@ impl CMake {
 impl Display for CMake {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Lines like: find_package(rs-processing-chain-tools REQUIRED CONFIG)
-        let find_packages = self
-            .dependencies
-            .iter()
-            .map(|dep| format!("find_package({} REQUIRED CONFIG)", dep.name))
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        let link_libs = self
-            .dependencies
-            .iter()
-            .map(|dep| {
-                format!(
-                    "target_link_libraries({} PRIVATE {}::{})",
-                    self.project_name, dep.name, dep.name
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        let include_dirs = self
-            .dependencies
-            .iter()
-            .map(|dep| {
-                format!(
-                    "target_include_directories({} PRIVATE ${{{}_INCLUDE_DIRS}})",
-                    self.project_name, dep.name
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
 
         write!(
             f,
@@ -189,9 +156,7 @@ set(CMAKE_CXX_STANDARD {std})
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS {export_cmds})
 
-# NOTE: Do NOT include the toolchain here.
-# Pass it during configure:
-# cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=build/generators/conan_toolchain.cmake
+include("${{CMAKE_BINARY_DIR}}/conandeps_legacy.cmake")
 
 # Collect sources from ../src relative to this CMakeLists.txt
 file(GLOB_RECURSE PROJECT_SOURCES CONFIGURE_DEPENDS
@@ -206,13 +171,34 @@ file(GLOB_RECURSE PROJECT_SOURCES CONFIGURE_DEPENDS
     "${{CMAKE_CURRENT_LIST_DIR}}/../src/*.hh"
     "${{CMAKE_CURRENT_LIST_DIR}}/../src/*.hxx"
 )
+list(FILTER PROJECT_SOURCES EXCLUDE REGEX ".*/main\\.cpp$")
 
-{find_packages}
+add_library(lib{name} ${{PROJECT_SOURCES}})
+add_executable({name} ${{CMAKE_CURRENT_LIST_DIR}}/../src/main.cpp)
 
-add_executable({name} ${{PROJECT_SOURCES}})
+target_link_libraries(lib{name} ${{CONANDEPS_LEGACY}})
+target_link_libraries({name} lib{name})
 
-{link_libs}
-{include_dirs}
+# ---- tests ----
+include(CTest)
+if(BUILD_TESTING)
+  include(GoogleTest)
+
+  file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS
+       "${{CMAKE_CURRENT_LIST_DIR}}/../tests/test_*.cpp")
+
+  if(TEST_SOURCES)
+    # tiny main you generate once (avoids gtest_main component naming)
+    set(C3PG_GTEST_MAIN "${{CMAKE_CURRENT_LIST_DIR}}/_c3pg_gtest_main.cpp")
+
+    add_executable({name}_tests ${{TEST_SOURCES}} "${{C3PG_GTEST_MAIN}}")
+    target_link_libraries(examples_tests PRIVATE
+      lib{name}
+      gtest::gtest
+    )
+    gtest_discover_tests({name}_tests DISCOVERY_MODE PRE_TEST)
+  endif()
+endif()
 "#,
             name = self.project_name,
             std = self.cpp_standard,
@@ -221,8 +207,6 @@ add_executable({name} ${{PROJECT_SOURCES}})
             } else {
                 "OFF"
             },
-            find_packages = find_packages,
-            link_libs = link_libs,
         )
     }
 }
@@ -249,7 +233,7 @@ fn cmake_build_verbosity_args(lvl: LevelFilter) -> &'static [&'static str] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{config::*, test_utils::MockCommandRunner};
+    use crate::{config::*, dependency::Dependency, test_utils::MockCommandRunner};
 
     #[test]
     fn test_cmake_build() {
@@ -331,7 +315,6 @@ mod tests {
             project_name: "NoDepsProject".to_string(),
             cpp_standard: CppStandard::Cpp17,
             export_compile_commands: false,
-            dependencies: vec![],
         };
 
         let cmake_string = cmake.to_string();
@@ -343,7 +326,6 @@ mod tests {
 
         // Ensure no dependency-specific commands are present
         assert!(!cmake_string.contains("find_package"));
-        assert!(!cmake_string.contains("target_link_libraries"));
         assert!(!cmake_string.contains("target_include_directories"));
     }
 
@@ -374,27 +356,13 @@ mod tests {
                 remote: Some("custom_remote".to_string()),
                 silent: false,
             },
+            testing: TestingConfig::default(),
         };
 
         let cmake = CMake::from_config(&config);
 
         // Validate project name
         assert_eq!(cmake.project_name, "CustomProject");
-
-        // Validate dependencies
-        assert_eq!(
-            cmake.dependencies,
-            vec![
-                Dependency {
-                    name: "Dependency1".to_string(),
-                    ..Default::default()
-                },
-                Dependency {
-                    name: "Dependency2".to_string(),
-                    ..Default::default()
-                },
-            ]
-        );
 
         // Validate C++ standard
         assert_eq!(cmake.cpp_standard, CppStandard::Cpp17);

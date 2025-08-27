@@ -86,6 +86,7 @@ dependencies = [
  "log",
  "macros",
  "regex",
+ "semver",
  "serde",
  "tempfile",
  "toml",
@@ -387,6 +388,12 @@ dependencies = [
  "linux-raw-sys",
  "windows-sys",
 ]
+
+[[package]]
+name = "semver"
+version = "1.0.26"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56e6fa9c48d24d85fb3de5ad847117517440f6beceb7798af16b4a87d616b8d0"
 
 [[package]]
 name = "serde"

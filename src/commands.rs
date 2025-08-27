@@ -73,23 +73,8 @@ int main() {
 pub fn cmd_add(runner: impl CommandRunner, expr: &str) -> Result<()> {
     let mut config = build_config(&runner)?;
 
-    // Find dependency
-    let dependency = Conan::from_config(&runner, &config)?
-        .get_latest_matching_dependency(&runner, expr)?
-        .ok_or(anyhow!("Could not find dependency {} in remotes", expr))?;
+    find_and_add_dependency(runner, expr, &mut config)?;
 
-    // 1. Read and parse existing conanfile.py and CMakeLists.txt
-    let cache_dir = PathBuf::from(&config.project.cache_dir);
-    let conanfile_path = cache_dir.join("conanfile.py");
-    let cmake_path = cache_dir.join("CMakeLists.txt");
-
-    // 2. Add dependency
-    config.project.add_dependency(dependency.clone());
-    Conan::from_config(&runner, &config)?.to_file(conanfile_path)?;
-    CMake::from_config(&config).to_file(cmake_path)?;
-    config.to_file("c3pg.toml")?;
-
-    info!("Added dependency '{}'", dependency);
     Ok(())
 }
 
@@ -172,7 +157,7 @@ pub fn cmd_test(runner: impl CommandRunner, args: TestArgs, lvl: LevelFilter) ->
     let mut config = build_config(&runner)?;
     match args.command {
         Some(command) => match command {
-            crate::cli::TestOnlySubcmds::Init => testing_init(runner, lvl, &mut config.testing)?,
+            crate::cli::TestOnlySubcmds::Init => testing_init(runner, lvl, &mut config)?,
             crate::cli::TestOnlySubcmds::Add { name } => {
                 testing_add(runner, lvl, &config.testing, &name)?
             }
@@ -180,7 +165,7 @@ pub fn cmd_test(runner: impl CommandRunner, args: TestArgs, lvl: LevelFilter) ->
         None => testing_run(
             runner,
             lvl,
-            &config.testing,
+            &config,
             args.filter.as_deref(),
             args.jobs,
         )?,
@@ -202,6 +187,30 @@ pub fn cmd_clean(runner: impl CommandRunner) -> Result<()> {
 
     info!("Removed all build artifacts in {}", cache_dir.display());
 
+    Ok(())
+}
+
+pub fn find_and_add_dependency(
+    runner: impl CommandRunner,
+    expr: &str,
+    config: &mut Config,
+) -> Result<()> {
+    // Find dependency
+    let dependency = Conan::from_config(&runner, &config)?
+        .get_latest_matching_dependency(&runner, expr)?
+        .ok_or(anyhow!("Could not find dependency {} in remotes", expr))?;
+
+    // 1. Read and parse existing conanfile.py and CMakeLists.txt
+    let cache_dir = PathBuf::from(&config.project.cache_dir);
+    let conanfile_path = cache_dir.join("conanfile.py");
+    let cmake_path = cache_dir.join("CMakeLists.txt");
+
+    // 2. Add dependency
+    config.project.add_dependency(dependency.clone());
+    Conan::from_config(&runner, &config)?.to_file(conanfile_path)?;
+    CMake::from_config(&config).to_file(cmake_path)?;
+
+    info!("Added dependency '{}'", dependency);
     Ok(())
 }
 

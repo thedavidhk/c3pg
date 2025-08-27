@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use heck::ToTitleCase;
 use log::LevelFilter;
+use semver::Version;
 use std::fmt;
 use std::str::FromStr;
 
@@ -77,12 +78,31 @@ impl Conan {
         dependency: Dependency,
     ) -> Result<Option<Dependency>> {
         let search_result = self.search(runner, dependency.name.as_str())?;
-        let matching_versions = search_result
+
+        // collect (version, dep) pairs for those that parse as semver
+        let mut pairs: Vec<(Version, Dependency)> = search_result
             .lines()
-            .filter_map(|line| Dependency::from_str(line).ok())
-            .filter(|entry| entry.matches(&dependency))
-            .next_back();
-        Ok(matching_versions)
+            .filter_map(|l| Dependency::from_str(l).ok())
+            .filter(|d| d.matches(&dependency))
+            .filter_map(|d| {
+                // adjust if your version access differs
+                Version::parse(d.version.clone()?.as_str())
+                    .ok()
+                    .map(|v| (v, d))
+            })
+            .collect();
+
+        pairs.sort_unstable_by(|a, b| a.0.cmp(&b.0)); // ascending
+
+        // prefer stable; otherwise take highest pre-release
+        let picked = pairs
+            .iter()
+            .rev()
+            .find(|(v, _)| v.pre.is_empty())
+            .cloned()
+            .or_else(|| pairs.into_iter().last());
+
+        Ok(picked.map(|(_, d)| d))
     }
 
     fn search(&self, runner: impl CommandRunner, expr: &str) -> Result<String> {
@@ -177,6 +197,7 @@ mod tests {
             },
             cmake: crate::config::CMakeConfig::default(),
             conan: crate::config::ConanConfig::default(),
+            testing: crate::config::TestingConfig::default(),
         };
 
         let conan =
