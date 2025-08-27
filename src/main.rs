@@ -13,6 +13,7 @@ mod commands;
 mod conan;
 mod config;
 mod dependency;
+mod testing;
 mod traits;
 
 #[cfg(test)]
@@ -38,6 +39,7 @@ fn run() -> Result<()> {
         Commands::Remove { dependency } => cmd_remove(&runner, &dependency)?,
         Commands::Build { build_type } => cmd_build(&runner, build_type.unwrap_or_default(), lvl)?,
         Commands::Run { build_type } => cmd_run(&runner, build_type.unwrap_or_default(), lvl)?,
+        Commands::Test(testargs) => cmd_test(&runner, testargs, lvl)?,
         Commands::Clean => cmd_clean(&runner)?,
     }
     Ok(())

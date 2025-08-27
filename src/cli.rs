@@ -1,4 +1,5 @@
 use clap::{ArgAction, Parser, Subcommand};
+use clap_derive::Args;
 use clap_verbosity_flag::{InfoLevel, Verbosity};
 
 use crate::cmake::{BuildType, CppStandard};
@@ -12,6 +13,37 @@ pub struct Cli {
     pub command: Commands,
     #[command(flatten)]
     pub verbose: Verbosity<InfoLevel>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum TestOnlySubcmds {
+    /// Initialize tests
+    Init,
+    /// Add a new test by name
+    Add { name: String },
+}
+
+#[derive(Args, Debug)]
+#[command(
+    // Make the "run-like" args conflict with subcommands,
+    // so using a subcommand hides/negates them.
+    args_conflicts_with_subcommands = true,
+    subcommand_negates_reqs = true,
+    // Optional: explain the default in help/usage
+    about = "Testing (default: runs tests if no subcommand is given)"
+)]
+pub struct TestArgs {
+    /// Expression to match test cases to run
+    #[arg(short, long)]
+    pub filter: Option<String>,
+
+    /// Number of parallel jobs
+    #[arg(short, long)]
+    pub jobs: Option<u8>,
+
+    /// Other test-related subcommands
+    #[command(subcommand)]
+    pub command: Option<TestOnlySubcmds>,
 }
 
 /// List of subcommands.
@@ -52,6 +84,8 @@ pub enum Commands {
         #[arg(long, short)]
         build_type: Option<BuildType>,
     },
+    /// Testing
+    Test(TestArgs),
     /// Remove artifacts that c3pg has generated in the past
     Clean,
 }

@@ -13,6 +13,7 @@ pub struct Config {
     pub project: Project,
     pub cmake: CMakeConfig,
     pub conan: ConanConfig,
+    pub testing: TestingConfig,
 }
 
 impl fmt::Display for Config {
@@ -127,6 +128,21 @@ impl Default for ConanConfig {
             bin: "conan".to_string(),
             remote: None,
             silent: false,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TestingConfig {
+    pub enabled: bool,
+    pub dir: String,
+}
+
+impl Default for TestingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            dir: "tests".to_string(),
         }
     }
 }

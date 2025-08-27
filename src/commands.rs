@@ -6,13 +6,19 @@ use std::{
     process::{Command, Stdio},
 };
 
-use crate::config::Config;
-use crate::traits::{FromFile, ToFile};
+use crate::{
+    cli::TestArgs,
+    traits::{FromFile, ToFile},
+};
 use crate::{
     cmake::{BuildType, CMake, CppStandard},
     command_runner::CommandRunner,
 };
 use crate::{command_runner::binary_stream_mode, conan::Conan};
+use crate::{
+    config::Config,
+    testing::{testing_add, testing_init, testing_run},
+};
 
 /// Create a new sandbox directory with a minimal setup (CMakeLists.txt, conanfile.py, main.cpp).
 pub fn cmd_new(
@@ -159,6 +165,27 @@ pub fn cmd_run(runner: impl CommandRunner, build_type: BuildType, lvl: LevelFilt
             format!("Could not run binary {}", binary_path.to_string_lossy()).as_str(),
         )?;
 
+    Ok(())
+}
+
+pub fn cmd_test(runner: impl CommandRunner, args: TestArgs, lvl: LevelFilter) -> Result<()> {
+    let mut config = build_config(&runner)?;
+    match args.command {
+        Some(command) => match command {
+            crate::cli::TestOnlySubcmds::Init => testing_init(runner, lvl, &mut config.testing)?,
+            crate::cli::TestOnlySubcmds::Add { name } => {
+                testing_add(runner, lvl, &config.testing, &name)?
+            }
+        },
+        None => testing_run(
+            runner,
+            lvl,
+            &config.testing,
+            args.filter.as_deref(),
+            args.jobs,
+        )?,
+    };
+    config.to_file("c3pg.toml")?;
     Ok(())
 }
 
