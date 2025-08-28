@@ -100,7 +100,7 @@ impl Conan {
             .rev()
             .find(|(v, _)| v.pre.is_empty())
             .cloned()
-            .or_else(|| pairs.into_iter().last());
+            .or_else(|| pairs.into_iter().next_back());
 
         Ok(picked.map(|(_, d)| d))
     }

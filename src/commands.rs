@@ -17,7 +17,7 @@ use crate::{
 use crate::{command_runner::binary_stream_mode, conan::Conan};
 use crate::{
     config::Config,
-    testing::{testing_add, testing_init, testing_run},
+    testing::{testing_add, testing_run},
 };
 
 /// Create a new sandbox directory with a minimal setup (CMakeLists.txt, conanfile.py, main.cpp).
@@ -30,7 +30,7 @@ pub fn cmd_new(
     // 1. Create the sandbox directory
     let project_path = PathBuf::from(sandbox_name);
     let src_dir = project_path.join("src");
-    fs::create_dir_all(&src_dir).context("Could not create src_dir")?;
+    fs::create_dir_all(&src_dir).context("Could not create src dir")?;
     let mut config = Config::default();
     let cache_dir = project_path.join(&config.project.cache_dir);
     fs::create_dir_all(&cache_dir).context("Could not create build dir")?;
@@ -154,21 +154,14 @@ pub fn cmd_run(runner: impl CommandRunner, build_type: BuildType, lvl: LevelFilt
 }
 
 pub fn cmd_test(runner: impl CommandRunner, args: TestArgs, lvl: LevelFilter) -> Result<()> {
-    let mut config = build_config(&runner)?;
+    let config = build_config(&runner)?;
     match args.command {
         Some(command) => match command {
-            crate::cli::TestOnlySubcmds::Init => testing_init(runner, lvl, &mut config)?,
             crate::cli::TestOnlySubcmds::Add { name } => {
                 testing_add(runner, lvl, &config.testing, &name)?
             }
         },
-        None => testing_run(
-            runner,
-            lvl,
-            &config,
-            args.filter.as_deref(),
-            args.jobs,
-        )?,
+        None => testing_run(runner, lvl, &config, args.filter.as_deref(), args.jobs)?,
     };
     config.to_file("c3pg.toml")?;
     Ok(())
@@ -196,7 +189,7 @@ pub fn find_and_add_dependency(
     config: &mut Config,
 ) -> Result<()> {
     // Find dependency
-    let dependency = Conan::from_config(&runner, &config)?
+    let dependency = Conan::from_config(&runner, config)?
         .get_latest_matching_dependency(&runner, expr)?
         .ok_or(anyhow!("Could not find dependency {} in remotes", expr))?;
 
@@ -207,8 +200,8 @@ pub fn find_and_add_dependency(
 
     // 2. Add dependency
     config.project.add_dependency(dependency.clone());
-    Conan::from_config(&runner, &config)?.to_file(conanfile_path)?;
-    CMake::from_config(&config).to_file(cmake_path)?;
+    Conan::from_config(&runner, config)?.to_file(conanfile_path)?;
+    CMake::from_config(config).to_file(cmake_path)?;
 
     info!("Added dependency '{}'", dependency);
     Ok(())

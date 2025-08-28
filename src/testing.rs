@@ -4,10 +4,7 @@ use anyhow::{anyhow, Context, Result};
 use log::{info, LevelFilter};
 
 use crate::{
-    cmake::CMake,
     command_runner::{binary_stream_mode, tool_stream_mode, CommandRunner},
-    commands::{cmd_add, find_and_add_dependency},
-    conan::Conan,
     config::{Config, TestingConfig},
     traits::ToFile,
 };
@@ -38,33 +35,6 @@ TEST({}, hello_test)
             self.name
         )
     }
-}
-
-pub fn testing_init(
-    runner: impl CommandRunner,
-    lvl: LevelFilter,
-    config: &mut Config,
-) -> Result<()> {
-    info!("Initialize tests");
-    config.testing.enabled = true;
-    runner
-        .command("mkdir")
-        .args(["-p", config.testing.dir.as_str()])
-        .stream_mode(tool_stream_mode(lvl))
-        .run()?;
-    let gtest_main = Path::new("build/_c3pg_gtest_main.cpp");
-    std::fs::write(
-        &gtest_main,
-        r#"#include <gtest/gtest.h>
-
-int main(int argc, char** argv) {
-    ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
-}"#,
-    )
-    .context("Could not write gtest main file")?;
-    find_and_add_dependency(runner, "gtest", config)?;
-    Ok(())
 }
 
 pub fn testing_add(
@@ -103,6 +73,10 @@ pub fn testing_build(
     filter: Option<&str>,
     jobs: Option<u8>,
 ) -> Result<()> {
+    if !config.testing.enabled {
+        info!("Testing is not enabled. You can enable it in c3pg.toml");
+        return Ok(());
+    }
     info!(
         "Building tests matching expression {} ({} jobs)",
         filter.unwrap_or_default(),
@@ -124,6 +98,10 @@ pub fn testing_run(
     filter: Option<&str>,
     jobs: Option<u8>,
 ) -> Result<()> {
+    if !config.testing.enabled {
+        info!("Testing is not enabled. You can enable it in c3pg.toml");
+        return Ok(());
+    }
     testing_build(&runner, lvl, config, filter, jobs)?;
     info!(
         "Running tests matching expression {} ({} jobs)",

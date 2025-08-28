@@ -17,8 +17,6 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum TestOnlySubcmds {
-    /// Initialize tests
-    Init,
     /// Add a new test by name
     Add { name: String },
 }

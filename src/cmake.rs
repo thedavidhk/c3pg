@@ -82,6 +82,7 @@ pub struct CMake {
     pub project_name: String,
     pub cpp_standard: CppStandard,
     pub export_compile_commands: bool,
+    pub enable_tests: bool,
 }
 
 impl CMake {
@@ -138,14 +139,13 @@ impl CMake {
             project_name: config.project.name.clone(),
             cpp_standard: config.cmake.standard.clone(),
             export_compile_commands: config.cmake.export_compile_commands,
+            enable_tests: config.testing.enabled,
         }
     }
 }
 
 impl Display for CMake {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Lines like: find_package(rs-processing-chain-tools REQUIRED CONFIG)
-
         write!(
             f,
             r#"cmake_minimum_required(VERSION 3.21)
@@ -179,26 +179,6 @@ add_executable({name} ${{CMAKE_CURRENT_LIST_DIR}}/../src/main.cpp)
 target_link_libraries(lib{name} ${{CONANDEPS_LEGACY}})
 target_link_libraries({name} lib{name})
 
-# ---- tests ----
-include(CTest)
-if(BUILD_TESTING)
-  include(GoogleTest)
-
-  file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS
-       "${{CMAKE_CURRENT_LIST_DIR}}/../tests/test_*.cpp")
-
-  if(TEST_SOURCES)
-    # tiny main you generate once (avoids gtest_main component naming)
-    set(C3PG_GTEST_MAIN "${{CMAKE_CURRENT_LIST_DIR}}/_c3pg_gtest_main.cpp")
-
-    add_executable({name}_tests ${{TEST_SOURCES}} "${{C3PG_GTEST_MAIN}}")
-    target_link_libraries(examples_tests PRIVATE
-      lib{name}
-      gtest::gtest
-    )
-    gtest_discover_tests({name}_tests DISCOVERY_MODE PRE_TEST)
-  endif()
-endif()
 "#,
             name = self.project_name,
             std = self.cpp_standard,
@@ -207,7 +187,55 @@ endif()
             } else {
                 "OFF"
             },
-        )
+        )?;
+        if self.enable_tests {
+            write!(
+                f,
+                r#"# ---- tests ----
+include(CTest)                     # defines BUILD_TESTING
+if(BUILD_TESTING)
+  include(GoogleTest)              # provides gtest_discover_tests()
+
+  # Create a tiny main() so we don't depend on a gtest_main component name
+  set(C3PG_GTEST_MAIN "${{CMAKE_CURRENT_BINARY_DIR}}/_c3pg_gtest_main.cpp")
+  file(WRITE "${{C3PG_GTEST_MAIN}}" [=[
+    #include <gtest/gtest.h>
+    int main(int argc, char** argv) {{
+      ::testing::InitGoogleTest(&argc, argv);
+      return RUN_ALL_TESTS();
+    }}
+  ]=])
+
+  # Non-recursive: only files directly in tests/ that match test_*.cpp
+  file(GLOB TEST_FILES
+       "${{CMAKE_CURRENT_LIST_DIR}}/../tests/test_*.cpp")
+
+  # Aggregate target (optional but convenient)
+  add_custom_target({name}_tests)
+
+  foreach(test_src IN LISTS TEST_FILES)
+    # Derive a safe target name from the file name (e.g., test_math.cpp -> test_math)
+    get_filename_component(test_base "${{test_src}}" NAME_WE)
+    string(MAKE_C_IDENTIFIER "${{test_base}}" test_target)
+
+    add_executable("${{test_target}}" "${{test_src}}" "${{C3PG_GTEST_MAIN}}")
+    target_link_libraries("${{test_target}}" PRIVATE lib{name} gtest::gtest)
+    target_compile_features("${{test_target}}" PRIVATE cxx_std_{std})
+
+    # Register individual tests with CTest; prefix with the file's base name
+    gtest_discover_tests("${{test_target}}"
+      TEST_PREFIX "${{test_base}}."
+      DISCOVERY_MODE PRE_TEST
+    )
+
+    add_dependencies({name}_tests "${{test_target}}")
+  endforeach()
+endif()"#,
+                name = self.project_name,
+                std = self.cpp_standard,
+            )?;
+        }
+        Ok(())
     }
 }
 
@@ -315,6 +343,7 @@ mod tests {
             project_name: "NoDepsProject".to_string(),
             cpp_standard: CppStandard::Cpp17,
             export_compile_commands: false,
+            enable_tests: false,
         };
 
         let cmake_string = cmake.to_string();

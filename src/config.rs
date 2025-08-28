@@ -135,13 +135,15 @@ impl Default for ConanConfig {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TestingConfig {
     pub enabled: bool,
+    pub link: bool,
     pub dir: String,
 }
 
 impl Default for TestingConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
+            link: false,
             dir: "tests".to_string(),
         }
     }
