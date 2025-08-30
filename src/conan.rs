@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use heck::ToTitleCase;
+use heck::ToPascalCase;
 use log::LevelFilter;
 use semver::Version;
 use std::fmt;
@@ -143,7 +143,7 @@ impl fmt::Display for Conan {
                 .join("\n")
         };
 
-        let class_name = self.project_name.to_title_case();
+        let class_name = self.project_name.to_pascal_case();
 
         write!(
             f,

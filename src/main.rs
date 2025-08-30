@@ -1,3 +1,5 @@
+use c3pg::*;
+
 use anyhow::Result;
 use clap::Parser;
 use command_runner::SystemCommandRunner;
@@ -5,16 +7,6 @@ use log::warn;
 
 use crate::cli::*;
 use crate::commands::*;
-
-mod cli;
-mod cmake;
-mod command_runner;
-mod commands;
-mod conan;
-mod config;
-mod dependency;
-mod testing;
-mod traits;
 
 #[cfg(test)]
 mod test_utils;

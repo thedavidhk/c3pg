@@ -50,6 +50,7 @@ int main() {
     config.cmake.standard = standard;
     CMake::from_config(&config).to_file(cache_dir.join("CMakeLists.txt"))?;
     Conan::from_config(&runner, &config)?.to_file(cache_dir.join("conanfile.py"))?;
+    find_and_add_dependency(runner, "gtest", &mut config)?;
     config.to_file(project_path.join("c3pg.toml"))?;
 
     if git {
@@ -72,10 +73,8 @@ int main() {
 /// Add a Conan dependency to the current project
 pub fn cmd_add(runner: impl CommandRunner, expr: &str) -> Result<()> {
     let mut config = build_config(&runner)?;
-
     find_and_add_dependency(runner, expr, &mut config)?;
-
-    Ok(())
+    config.to_file("c3pg.toml")
 }
 
 /// Remove a Conan dependency from the current project
@@ -200,8 +199,12 @@ pub fn find_and_add_dependency(
 
     // 2. Add dependency
     config.project.add_dependency(dependency.clone());
-    Conan::from_config(&runner, config)?.to_file(conanfile_path)?;
-    CMake::from_config(config).to_file(cmake_path)?;
+    Conan::from_config(&runner, config)?
+        .to_file(conanfile_path)
+        .with_context(|| "Could not write conan config")?;
+    CMake::from_config(config)
+        .to_file(cmake_path)
+        .with_context(|| "Could not write CMake config")?;
 
     info!("Added dependency '{}'", dependency);
     Ok(())
