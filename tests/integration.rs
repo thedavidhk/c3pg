@@ -148,6 +148,69 @@ fn test_new_fails_gracefully_if_conan_has_no_remotes() {
 }
 
 // ---------------------------------------------------------------------------
+// cmd_init tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_init_creates_project_in_current_dir() {
+    let tmp = TempDir::new().unwrap();
+    let runner = mock_with_conan_responses();
+
+    with_cwd(tmp.path(), || {
+        cmd_init(&runner, false, CppStandard::default()).unwrap();
+    });
+
+    assert_file_exists(&tmp.path().join("c3pg.toml"));
+    assert_file_exists(&tmp.path().join("src/main.cpp"));
+    assert_file_exists(&tmp.path().join("build/CMakeLists.txt"));
+    assert_file_exists(&tmp.path().join("build/conanfile.py"));
+    assert_file_contains(&tmp.path().join("src/main.cpp"), "Hello from C3PG!");
+}
+
+#[test]
+fn test_init_preserves_existing_sources() {
+    let tmp = TempDir::new().unwrap();
+    let runner = mock_with_conan_responses();
+
+    // Pre-create src/ with a custom file
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::write(tmp.path().join("src/app.cpp"), "// my app\n").unwrap();
+
+    with_cwd(tmp.path(), || {
+        cmd_init(&runner, false, CppStandard::default()).unwrap();
+    });
+
+    // Custom source should still be there
+    assert_file_contains(&tmp.path().join("src/app.cpp"), "// my app");
+    // main.cpp should NOT have been written (sources already exist)
+    assert!(!tmp.path().join("src/main.cpp").exists());
+    // But config should still be created
+    assert_file_exists(&tmp.path().join("c3pg.toml"));
+}
+
+#[test]
+fn test_init_fails_if_already_initialized() {
+    let tmp = TempDir::new().unwrap();
+    let runner = mock_with_conan_responses();
+
+    // First init succeeds
+    with_cwd(tmp.path(), || {
+        cmd_init(&runner, false, CppStandard::default()).unwrap();
+    });
+
+    // Second init should fail
+    let result = with_cwd(tmp.path(), || {
+        cmd_init(&runner, false, CppStandard::default())
+    });
+    assert!(result.is_err());
+    let err_msg = format!("{:#}", result.unwrap_err());
+    assert!(
+        err_msg.contains("already initialized"),
+        "Error should mention already initialized, got: {err_msg}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // cmd_add / cmd_remove tests
 // ---------------------------------------------------------------------------
 

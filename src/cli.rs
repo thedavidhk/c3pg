@@ -63,6 +63,16 @@ pub enum Commands {
         #[arg(long)]
         standard: Option<CppStandard>,
     },
+    /// Initialize c3pg in the current directory
+    Init {
+        /// Do not initialize an empty git repository
+        #[arg(long, action(ArgAction::SetFalse))]
+        no_git: bool,
+
+        /// Set the C++ standard
+        #[arg(long)]
+        standard: Option<CppStandard>,
+    },
     /// Add a Conan dependency to the current sandbox (in the current working directory)
     Add {
         /// Name of the Conan dependency (e.g. fmt/10.1.0)
