@@ -1,12 +1,13 @@
 use std::{fmt::Display, fs, path::Path};
 
 use anyhow::{Context, Result};
-use log::{info, LevelFilter};
+use log::LevelFilter;
 
 use crate::{
     command_runner::{binary_stream_mode, tool_stream_mode, CommandRunner},
     config::{Config, TestingConfig},
     traits::ToFile,
+    ui,
 };
 
 #[derive(Debug, ToFile)]
@@ -46,14 +47,14 @@ TEST({}, hello_test)
 /// Returns an error if the test directory cannot be created or the file
 /// cannot be written.
 pub fn testing_add(config: &TestingConfig, name: &str) -> Result<()> {
-    info!("Adding new test file {name}");
+    ui::status("Adding", &format!("test file {name}"));
     let dir = Path::new(&config.dir);
     let path = dir.join(format!("test_{name}.cpp"));
     if path
         .try_exists()
         .context(format!("test file {name} is inaccessible"))?
     {
-        info!("{} already exists.", path.display());
+        ui::warn(&format!("{} already exists, skipping", path.display()));
         return Ok(());
     }
     fs::create_dir_all(dir).context("Could not create test directory")?;
@@ -73,7 +74,7 @@ pub fn testing_build(
     config: &Config,
     jobs: Option<u8>,
 ) -> Result<()> {
-    info!("Building tests ({} jobs)", jobs.unwrap_or(1));
+    ui::status("Building", &format!("tests ({} jobs)", jobs.unwrap_or(1)));
     let test_target = format!("{}_tests", config.project.name);
     let cache_dir = config.project.cache_dir.as_str();
     let mut args = vec![
@@ -106,10 +107,13 @@ pub fn testing_run(
     jobs: Option<u8>,
 ) -> Result<()> {
     testing_build(&runner, lvl, config, jobs)?;
-    info!(
-        "Running tests matching expression {} ({} jobs)",
-        filter.unwrap_or_default(),
-        jobs.unwrap_or(1)
+    ui::status(
+        "Testing",
+        &format!(
+            "{} ({} jobs)",
+            filter.unwrap_or("*"),
+            jobs.unwrap_or(1)
+        ),
     );
     let cache_dir = config.project.cache_dir.as_str();
     let mut args = vec!["--test-dir", cache_dir, "--output-on-failure"];

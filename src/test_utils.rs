@@ -31,6 +31,7 @@ impl MockCommandRunner {
                     "Error".to_string()
                 },
                 success,
+                streamed: false,
             },
         }
     }
@@ -57,6 +58,7 @@ impl MockCommandRunner {
                 stdout: stdout.to_string(),
                 stderr: String::new(),
                 success: true,
+                streamed: false,
             },
         )
     }

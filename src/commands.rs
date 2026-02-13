@@ -1,5 +1,5 @@
 use anyhow::{anyhow, bail, Context, Result};
-use log::{info, LevelFilter};
+use log::LevelFilter;
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -21,6 +21,7 @@ use crate::{
 use crate::{
     config::Config,
     testing::{testing_add, testing_run},
+    ui,
 };
 
 /// Create a new sandbox directory with a minimal setup (`CMakeLists.txt`,
@@ -74,7 +75,7 @@ int main() {
             .expect_success("Could not initialize git repository")?;
     }
 
-    info!("Created new sandbox: {sandbox_name}");
+    ui::status("Created", sandbox_name);
     Ok(())
 }
 
@@ -117,7 +118,7 @@ pub fn cmd_remove(runner: impl CommandRunner, expr: &str) -> Result<()> {
     write_build_files(&runner, &config, &cache_dir)?;
     config.to_file("c3pg.toml")?;
 
-    info!("Removed dependency {expr}");
+    ui::status("Removed", &format!("dependency '{expr}'"));
     Ok(())
 }
 
@@ -146,20 +147,23 @@ fn cmd_build_inner(
 ) -> Result<()> {
     let cache_dir = PathBuf::from(&config.project.cache_dir);
 
-    Conan::from_config(runner, config)?.install(
-        runner,
-        &cache_dir.display().to_string(),
-        &cache_dir.display().to_string(),
-        build_type,
-        lvl,
-    )?;
+    Conan::from_config(runner, config)?
+        .install(
+            runner,
+            &cache_dir.display().to_string(),
+            &cache_dir.display().to_string(),
+            build_type,
+            lvl,
+        )
+        .context("conan install failed")?;
 
     // Read the build environment (CC, CXX, ...) that Conan generated so
     // cmake picks up the correct compiler.
     let build_env = conan::parse_conan_build_env(&cache_dir);
-    CMake::build(runner, build_type, &cache_dir, &cache_dir, lvl, &build_env)?;
+    CMake::build(runner, build_type, &cache_dir, &cache_dir, lvl, &build_env)
+        .context("cmake build failed")?;
 
-    info!("Build successful!\n");
+    ui::status("Finished", "build");
     Ok(())
 }
 
@@ -189,7 +193,7 @@ pub fn cmd_run(runner: impl CommandRunner, build_type: BuildType, lvl: LevelFilt
         .stream_mode(binary_stream_mode(lvl))
         .run()?
         .expect_success_with_stdout(
-            format!("Could not run binary {}", binary_path.to_string_lossy()).as_str(),
+            &format!("failed to run {}", binary_path.display()),
         )?;
 
     Ok(())
@@ -230,10 +234,11 @@ pub fn cmd_test(runner: impl CommandRunner, args: TestArgs, lvl: LevelFilter) ->
                 .map(|rd| rd.count() == 0)
                 .unwrap_or(true)
         {
-            info!("No tests found. Use `c3pg test add <name>` to create one.");
+            ui::status("Info", "no tests found -- use `c3pg test add <name>` to create one");
             return Ok(());
         }
-        testing_run(runner, lvl, &config, args.filter.as_deref(), args.jobs)?;
+        testing_run(runner, lvl, &config, args.filter.as_deref(), args.jobs)
+            .context("test failed")?;
     }
     Ok(())
 }
@@ -256,7 +261,7 @@ pub fn cmd_clean(runner: impl CommandRunner) -> Result<()> {
         fs::remove_dir_all(&cache_dir)?;
     }
 
-    info!("Removed all build artifacts in {}", cache_dir.display());
+    ui::status("Cleaned", &cache_dir.display().to_string());
 
     Ok(())
 }
@@ -283,7 +288,7 @@ pub fn find_and_add_dependency(
     let cache_dir = project_root.join(&config.project.cache_dir);
     write_build_files(runner, config, &cache_dir)?;
 
-    info!("Added dependency '{dependency}'");
+    ui::status("Added", &format!("dependency '{dependency}'"));
     Ok(())
 }
 

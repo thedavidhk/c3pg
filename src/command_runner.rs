@@ -144,11 +144,61 @@ impl<R: CommandRunner> CommandBuilder<R> {
             .iter()
             .map(|(k, v)| (k.as_str(), v.as_str()))
             .collect();
-        self.runner.execute(&self.cmd, &args, self.mode, &env)
+        let was_streaming = matches!(
+            self.mode,
+            StreamMode::Stream {
+                stream_stderr: true,
+                ..
+            }
+        );
+        let mut result = self.runner.execute(&self.cmd, &args, self.mode, &env)?;
+        result.streamed = was_streaming;
+        Ok(result)
     }
 }
 
 pub struct SystemCommandRunner;
+
+/// Drain a child-process pipe on a background thread, collecting all output
+/// into `buf` and optionally echoing each line live to stdout or stderr.
+fn spawn_reader<R: std::io::Read + Send + 'static>(
+    pipe: Option<R>,
+    is_stdout: bool,
+    buf: std::sync::Arc<std::sync::Mutex<String>>,
+    stream: bool,
+    cmd_prefix: Option<String>,
+) -> std::thread::JoinHandle<()> {
+    use std::io::{BufRead, BufReader, Write};
+
+    std::thread::spawn(move || {
+        if let Some(pipe) = pipe {
+            let reader = BufReader::new(pipe);
+            for line in reader.lines().map_while(Result::ok) {
+                {
+                    let mut b = buf.lock().unwrap();
+                    b.push_str(&line);
+                    b.push('\n');
+                }
+
+                if stream {
+                    if is_stdout {
+                        if let Some(ref p) = cmd_prefix {
+                            print!("{p}");
+                        }
+                        println!("{line}");
+                        let _ = std::io::stdout().flush();
+                    } else {
+                        if let Some(ref p) = cmd_prefix {
+                            eprint!("{p}");
+                        }
+                        eprintln!("{line}");
+                        let _ = std::io::stderr().flush();
+                    }
+                }
+            }
+        }
+    })
+}
 
 impl CommandRunner for SystemCommandRunner {
     fn execute(
@@ -158,47 +208,17 @@ impl CommandRunner for SystemCommandRunner {
         mode: StreamMode,
         env: &[(&str, &str)],
     ) -> anyhow::Result<CommandResult> {
-        use std::io::{BufRead, BufReader, Write};
+        use std::io::IsTerminal;
         use std::process::{Command, Stdio};
         use std::sync::{Arc, Mutex};
-        use std::thread;
 
-        fn spawn_reader<R: std::io::Read + Send + 'static>(
-            pipe: Option<R>,
-            is_stdout: bool,
-            buf: Arc<Mutex<String>>,
-            stream: bool,
-            cmd_prefix: Option<String>,
-        ) -> thread::JoinHandle<()> {
-            thread::spawn(move || {
-                if let Some(pipe) = pipe {
-                    let reader = BufReader::new(pipe);
-                    for line in reader.lines().map_while(Result::ok) {
-                        {
-                            let mut b = buf.lock().unwrap();
-                            b.push_str(&line);
-                            b.push('\n');
-                        }
-
-                        if stream {
-                            if is_stdout {
-                                if let Some(ref p) = cmd_prefix {
-                                    print!("{p}");
-                                }
-                                println!("{line}");
-                                let _ = std::io::stdout().flush();
-                            } else {
-                                if let Some(ref p) = cmd_prefix {
-                                    eprint!("{p}");
-                                }
-                                eprintln!("{line}");
-                                let _ = std::io::stderr().flush();
-                            }
-                        }
-                    }
-                }
-            })
-        }
+        let is_streaming = matches!(
+            mode,
+            StreamMode::Stream {
+                stream_stderr: true,
+                ..
+            }
+        );
 
         let mut command = Command::new(cmd);
         command
@@ -207,6 +227,16 @@ impl CommandRunner for SystemCommandRunner {
             .stderr(Stdio::piped());
         for (k, v) in env {
             command.env(k, v);
+        }
+
+        // When stderr is being streamed AND our own stderr is a terminal,
+        // tell child processes to force ANSI color output. Without this,
+        // tools like GCC, Clang, and CMake disable color because their
+        // stdout/stderr is a pipe (Stdio::piped) rather than a TTY.
+        if is_streaming && std::io::stderr().is_terminal() {
+            command.env("CLICOLOR_FORCE", "1");
+            command.env("CMAKE_COLOR_DIAGNOSTICS", "ON");
+            command.env("FORCE_COLOR", "1");
         }
         let mut child = command.spawn()?;
 
@@ -257,6 +287,7 @@ impl CommandRunner for SystemCommandRunner {
             stdout,
             stderr,
             success: status.success(),
+            streamed: false, // `CommandBuilder::run()` sets this based on the mode
         })
     }
 }
@@ -278,6 +309,10 @@ pub struct CommandResult {
     pub stdout: String,
     pub stderr: String,
     pub success: bool,
+    /// Whether stderr was already streamed live to the user's terminal.
+    /// When true, error messages should reference "see output above" instead
+    /// of repeating the stderr contents.
+    pub streamed: bool,
 }
 
 impl CommandResult {
@@ -286,12 +321,15 @@ impl CommandResult {
     /// # Errors
     ///
     /// Returns an error containing `cmd` and `stderr` when the command exited
-    /// with a non-zero status.
+    /// with a non-zero status. If stderr was already streamed live, the error
+    /// references the earlier output instead of repeating it.
     pub fn expect_success_with_stdout(self, cmd: &str) -> anyhow::Result<String> {
         if self.success {
             Ok(self.stdout)
+        } else if self.streamed {
+            anyhow::bail!("Command `{cmd}` failed (see output above)");
         } else {
-            anyhow::bail!("Command `{}` failed: {}", cmd, self.stderr);
+            anyhow::bail!("Command `{cmd}` failed: {}", self.stderr);
         }
     }
 
@@ -300,12 +338,16 @@ impl CommandResult {
     /// # Errors
     ///
     /// Returns an error prefixed with `error_msg` and including `stderr`
-    /// when the command exited with a non-zero status.
+    /// when the command exited with a non-zero status. If stderr was already
+    /// streamed live, the error references the earlier output instead of
+    /// repeating it.
     pub fn expect_success(self, error_msg: &str) -> anyhow::Result<()> {
         if self.success {
             Ok(())
+        } else if self.streamed {
+            anyhow::bail!("{error_msg} (see output above)");
         } else {
-            anyhow::bail!("{}: {}", error_msg, self.stderr);
+            anyhow::bail!("{error_msg}:\n{}", self.stderr);
         }
     }
 }
@@ -344,17 +386,20 @@ mod tests {
                     stdout: args.join(" "),
                     stderr: String::new(),
                     success: true,
+                    streamed: false,
                 }),
                 "fail" => Ok(CommandResult {
                     stdout: String::new(),
                     stderr: "Something went wrong!".to_string(),
                     success: false,
+                    streamed: false,
                 }),
                 // success stubs for verbosity mapping tests
                 "conan" => Ok(CommandResult {
                     stdout: format!("conan {}", args.join(" ")),
                     stderr: String::new(),
                     success: true,
+                    streamed: false,
                 }),
                 "cmake" => {
                     let is_build = args.contains(&"--build");
@@ -367,6 +412,7 @@ mod tests {
                         stdout,
                         stderr: String::new(),
                         success: true,
+                        streamed: false,
                     })
                 }
                 _ => anyhow::bail!("Unknown command"),
@@ -421,6 +467,7 @@ mod tests {
             stdout: "All good!".to_string(),
             stderr: String::new(),
             success: true,
+            streamed: false,
         };
 
         let stdout = result.expect_success_with_stdout("mock_cmd").unwrap();
@@ -433,9 +480,23 @@ mod tests {
             stdout: String::new(),
             stderr: "Error!".to_string(),
             success: false,
+            streamed: false,
         };
 
         let err = result.expect_success("Command failed").unwrap_err();
-        assert_eq!(format!("{err}"), "Command failed: Error!");
+        assert_eq!(format!("{err}"), "Command failed:\nError!");
+    }
+
+    #[test]
+    fn test_command_result_expect_success_failure_streamed() {
+        let result = CommandResult {
+            stdout: String::new(),
+            stderr: "Error!".to_string(),
+            success: false,
+            streamed: true,
+        };
+
+        let err = result.expect_success("Command failed").unwrap_err();
+        assert_eq!(format!("{err}"), "Command failed (see output above)");
     }
 }

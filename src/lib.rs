@@ -12,6 +12,7 @@ pub mod config;
 pub mod dependency;
 pub mod testing;
 pub mod traits;
+pub mod ui;
 
 #[doc(hidden)]
 pub mod test_utils;

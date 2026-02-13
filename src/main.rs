@@ -1,9 +1,8 @@
-use c3pg::{cmake, cli, command_runner, commands};
+use c3pg::{cmake, cli, command_runner, commands, ui};
 
 use anyhow::Result;
 use clap::Parser;
 use command_runner::SystemCommandRunner;
-use log::warn;
 
 use crate::cli::{Cli, Commands};
 use crate::commands::{cmd_new, cmd_add, cmd_remove, cmd_build, cmd_run, cmd_test, cmd_clean};
@@ -19,11 +18,17 @@ fn build_type(release: bool) -> cmake::BuildType {
 fn run() -> Result<()> {
     let cli = Cli::parse();
     let lvl = cli.verbose.log_level_filter();
-    env_logger::Builder::new()
-        .filter_level(lvl)
-        .format_target(false)
-        .format_timestamp(None)
-        .init();
+
+    // Only activate the log framework at debug/trace verbosity.
+    // Normal user output goes through the `ui` module instead.
+    if lvl >= log::LevelFilter::Debug {
+        env_logger::Builder::new()
+            .filter_level(lvl)
+            .format_target(false)
+            .format_timestamp(None)
+            .init();
+    }
+
     let runner = SystemCommandRunner;
 
     match cli.command {
@@ -46,7 +51,10 @@ fn main() {
     match run() {
         Ok(()) => (),
         Err(e) => {
-            warn!("{e}");
+            ui::error(&format!("{e}"));
+            for cause in e.chain().skip(1) {
+                eprintln!("  caused by: {cause}");
+            }
             std::process::exit(1);
         }
     }
