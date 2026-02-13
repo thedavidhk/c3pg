@@ -90,7 +90,8 @@ pub fn testing_build(
         .command("cmake")
         .args(args.iter().map(String::as_str))
         .stream_mode(tool_stream_mode(lvl))
-        .run()?;
+        .run()?
+        .expect_success("Failed to build tests")?;
     Ok(())
 }
 
