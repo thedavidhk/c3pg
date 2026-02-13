@@ -578,6 +578,81 @@ fn test_clean_succeeds_when_no_cache_dir() {
 }
 
 // ---------------------------------------------------------------------------
+// lockfile tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_build_calls_conan_lock_create() {
+    let (tmp, _) = setup_project_dir("lockbuild");
+    let runner = mock_with_conan_responses();
+
+    with_cwd(tmp.path(), || {
+        cmd_build(&runner, BuildType::Debug, LevelFilter::Info, &Sanitizers::default()).unwrap();
+    });
+
+    runner.assert_ran("conan", &["lock", "create"]);
+}
+
+#[test]
+fn test_build_with_existing_lockfile_passes_it_to_install() {
+    let (tmp, _) = setup_project_dir("lockexist");
+    let runner = mock_with_conan_responses();
+
+    // Create a lockfile before building
+    fs::write(tmp.path().join("c3pg.lock"), "{}").unwrap();
+
+    with_cwd(tmp.path(), || {
+        cmd_build(&runner, BuildType::Debug, LevelFilter::Info, &Sanitizers::default()).unwrap();
+    });
+
+    // conan install should have received --lockfile=c3pg.lock
+    runner.assert_ran("conan", &["install", "--lockfile=c3pg.lock"]);
+}
+
+#[test]
+fn test_add_dependency_removes_lockfile() {
+    let (tmp, _) = setup_project_dir("lockdel");
+    let runner = mock_with_conan_responses();
+
+    // Create a lockfile
+    fs::write(tmp.path().join("c3pg.lock"), "{}").unwrap();
+    assert!(tmp.path().join("c3pg.lock").exists());
+
+    with_cwd(tmp.path(), || {
+        cmd_add(&runner, "fmt").unwrap();
+    });
+
+    assert!(
+        !tmp.path().join("c3pg.lock").exists(),
+        "lockfile should be removed after cmd_add"
+    );
+}
+
+#[test]
+fn test_remove_dependency_removes_lockfile() {
+    let (tmp, _) = setup_project_dir("lockrm");
+    let runner = mock_with_conan_responses();
+
+    // Add a dependency first
+    with_cwd(tmp.path(), || {
+        cmd_add(&runner, "fmt").unwrap();
+    });
+
+    // Create a lockfile
+    fs::write(tmp.path().join("c3pg.lock"), "{}").unwrap();
+
+    let runner2 = mock_with_conan_responses();
+    with_cwd(tmp.path(), || {
+        cmd_remove(&runner2, "fmt").unwrap();
+    });
+
+    assert!(
+        !tmp.path().join("c3pg.lock").exists(),
+        "lockfile should be removed after cmd_remove"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // cmd_fmt / cmd_lint tests
 // ---------------------------------------------------------------------------
 

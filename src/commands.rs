@@ -144,6 +144,7 @@ pub fn cmd_add(runner: impl CommandRunner, expr: &str) -> Result<()> {
     let mut config = build_config(&runner)?;
     find_and_add_dependency(&runner, expr, &mut config, Path::new("."))?;
     config.to_file("c3pg.toml")?;
+    conan::remove_lockfile();
     Ok(())
 }
 
@@ -171,6 +172,7 @@ pub fn cmd_remove(runner: impl CommandRunner, expr: &str) -> Result<()> {
     let cache_dir = PathBuf::from(&config.project.cache_dir);
     write_build_files(&runner, &config, &cache_dir)?;
     config.to_file("c3pg.toml")?;
+    conan::remove_lockfile();
 
     ui::status("Removed", &format!("dependency '{expr}'"));
     Ok(())
@@ -202,17 +204,23 @@ fn cmd_build_inner(
     lvl: LevelFilter,
     sanitizers: &Sanitizers,
 ) -> Result<()> {
-    let cache_dir = PathBuf::from(&config.project.cache_dir);
+    crate::diagnostics::preflight_build(runner);
 
-    Conan::from_config(runner, config)?
-        .install(
-            runner,
-            &cache_dir.display().to_string(),
-            &cache_dir.display().to_string(),
-            build_type,
-            lvl,
-        )
+    let cache_dir = PathBuf::from(&config.project.cache_dir);
+    let cache_dir_str = cache_dir.display().to_string();
+
+    let conan = Conan::from_config(runner, config)?;
+    conan
+        .install(runner, &cache_dir_str, &cache_dir_str, build_type, lvl)
         .context("conan install failed")?;
+
+    // Capture resolved dependency versions into c3pg.lock so subsequent
+    // builds are reproducible.
+    let conanfile = cache_dir.join("conanfile.py");
+    if let Err(e) = conan.lock_create(runner, &conanfile.display().to_string(), lvl) {
+        // Non-fatal: a failed lock create should not block the build.
+        ui::warn(&format!("could not create lockfile: {e}"));
+    }
 
     // Read the build environment (CC, CXX, ...) that Conan generated so
     // cmake picks up the correct compiler.
@@ -298,6 +306,7 @@ pub fn cmd_test(runner: impl CommandRunner, args: TestArgs, lvl: LevelFilter) ->
         let cache_dir = PathBuf::from(&config.project.cache_dir);
         write_build_files(&runner, &config, &cache_dir)?;
         config.to_file("c3pg.toml")?;
+        conan::remove_lockfile();
     } else {
         // Auto-detect: only run if test files exist
         let test_dir = Path::new(&config.testing.dir);
