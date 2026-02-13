@@ -10,5 +10,5 @@ pub mod dependency;
 pub mod testing;
 pub mod traits;
 
-#[cfg(test)]
-mod test_utils;
+#[doc(hidden)]
+pub mod test_utils;

@@ -2,8 +2,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use log::{info, LevelFilter};
 use std::{
     fs,
-    path::PathBuf,
-    process::{Command, Stdio},
+    path::{Path, PathBuf},
 };
 
 use crate::{
@@ -15,7 +14,10 @@ use crate::{
     cmake::{BuildType, CMake, CppStandard},
     command_runner::CommandRunner,
 };
-use crate::{command_runner::binary_stream_mode, conan::Conan};
+use crate::{
+    command_runner::binary_stream_mode,
+    conan::{self, Conan},
+};
 use crate::{
     config::Config,
     testing::{testing_add, testing_run},
@@ -55,7 +57,7 @@ int main() {
     )
     .context("Could not write CMakeLists.txt")?;
     Conan::from_config(&runner, &config)?.to_file(cache_dir.join("conanfile.py"))?;
-    find_and_add_dependency(runner, "gtest", &mut config)?;
+    find_and_add_dependency(&runner, "gtest", &mut config, &project_path)?;
     config.to_file(project_path.join("c3pg.toml"))?;
 
     if git {
@@ -65,10 +67,11 @@ int main() {
             .context("Could not create gitignore")?;
 
         // Initialize empty git repo
-        Command::new("git")
+        runner
+            .command("git")
             .args(["init", "-b", "main", sandbox_name])
-            .stdout(Stdio::null())
-            .status()?;
+            .run()?
+            .expect_success("Could not initialize git repository")?;
     }
 
     info!("Created new sandbox: {}", sandbox_name);
@@ -78,7 +81,7 @@ int main() {
 /// Add a Conan dependency to the current project
 pub fn cmd_add(runner: impl CommandRunner, expr: &str) -> Result<()> {
     let mut config = build_config(&runner)?;
-    find_and_add_dependency(runner, expr, &mut config)?;
+    find_and_add_dependency(&runner, expr, &mut config, Path::new("."))?;
     config.to_file("c3pg.toml")
 }
 
@@ -128,7 +131,11 @@ pub fn cmd_build(
         build_type.clone(),
         lvl,
     )?;
-    CMake::build(&runner, build_type, cache_dir, cache_dir, lvl)?;
+
+    // Read the build environment (CC, CXX, ...) that Conan generated so
+    // cmake picks up the correct compiler.
+    let build_env = conan::parse_conan_build_env(cache_dir);
+    CMake::build(&runner, build_type, cache_dir, cache_dir, lvl, &build_env)?;
 
     info!("Build successful!\n");
     Ok(())
@@ -192,6 +199,7 @@ pub fn find_and_add_dependency(
     runner: impl CommandRunner,
     expr: &str,
     config: &mut Config,
+    project_root: &Path,
 ) -> Result<()> {
     // Find dependency
     let dependency = Conan::from_config(&runner, config)?
@@ -199,7 +207,7 @@ pub fn find_and_add_dependency(
         .ok_or(anyhow!("Could not find dependency {} in remotes", expr))?;
 
     // 1. Read and parse existing conanfile.py and CMakeLists.txt
-    let cache_dir = PathBuf::from(&config.project.cache_dir);
+    let cache_dir = project_root.join(&config.project.cache_dir);
     let conanfile_path = cache_dir.join("conanfile.py");
     let cmake_path = cache_dir.join("CMakeLists.txt");
 

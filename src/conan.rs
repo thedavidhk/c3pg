@@ -166,6 +166,46 @@ class {class_name}(ConanFile):
     }
 }
 
+/// Parse Conan-generated build-environment scripts (`conanbuildenv-*.sh`)
+/// in `cache_dir` and return any `CC` / `CXX` (or other `export VAR=val`)
+/// entries as `(key, value)` pairs.
+///
+/// These are typically needed so cmake picks up the same compiler that
+/// Conan was configured for.
+pub fn parse_conan_build_env(cache_dir: &str) -> Vec<(String, String)> {
+    use std::fs;
+    use std::path::Path;
+
+    let dir = Path::new(cache_dir);
+    let mut env = Vec::new();
+
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return env,
+    };
+
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with("conanbuildenv-") && name.ends_with(".sh") {
+            if let Ok(contents) = fs::read_to_string(entry.path()) {
+                for line in contents.lines() {
+                    // Match lines like: export CC="clang"  or  export CXX=clang++
+                    let line = line.trim();
+                    if let Some(rest) = line.strip_prefix("export ") {
+                        if let Some((key, val)) = rest.split_once('=') {
+                            let val = val.trim_matches('"').trim_matches('\'');
+                            env.push((key.to_string(), val.to_string()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    env
+}
+
 fn conan_verbosity_args(lvl: LevelFilter) -> &'static [&'static str] {
     match lvl {
         LevelFilter::Off => &["-vquiet"],

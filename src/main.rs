@@ -8,9 +8,6 @@ use log::warn;
 use crate::cli::*;
 use crate::commands::*;
 
-#[cfg(test)]
-mod test_utils;
-
 fn run() -> Result<()> {
     let cli = Cli::parse();
     let lvl = cli.verbose.log_level_filter();
@@ -41,7 +38,8 @@ fn main() {
     match run() {
         Ok(_) => (),
         Err(e) => {
-            warn!("{e}")
+            warn!("{e}");
+            std::process::exit(1);
         }
     }
 }

@@ -24,13 +24,7 @@ pub fn generate_cmakelists(config: &Config) -> Result<String> {
         .map(|p| cmake_list_dir_value(p))
         .collect();
 
-    let lib = Target::library(&lib_name, LibType::Static)
-        .srcs(lib_sources)
-        .link(PRIVATE, Value::Raw("${CONANDEPS_LEGACY}".into()));
-
-    let app = Target::executable(project_name)
-        .src(cmake_list_dir_value("src/main.cpp"))
-        .link(PRIVATE, &lib_name);
+    let has_lib = !lib_sources.is_empty();
 
     let mut project = Project::new(project_name)
         .languages(&["CXX"])
@@ -44,9 +38,22 @@ pub fn generate_cmakelists(config: &Config) -> Result<String> {
                 "OFF"
             },
         )
-        .include("${CMAKE_BINARY_DIR}/conandeps_legacy.cmake")
-        .target(lib)
-        .target(app);
+        .include("${CMAKE_BINARY_DIR}/conandeps_legacy.cmake");
+
+    if has_lib {
+        let lib = Target::library(&lib_name, LibType::Static)
+            .srcs(lib_sources)
+            .link(PRIVATE, Value::Raw("${CONANDEPS_LEGACY}".into()));
+        let app = Target::executable(project_name)
+            .src(cmake_list_dir_value("src/main.cpp"))
+            .link(PRIVATE, &lib_name);
+        project = project.target(lib).target(app);
+    } else {
+        let app = Target::executable(project_name)
+            .src(cmake_list_dir_value("src/main.cpp"))
+            .link(PRIVATE, Value::Raw("${CONANDEPS_LEGACY}".into()));
+        project = project.target(app);
+    }
 
     if config.testing.enabled {
         let gtest = TestFramework::GoogleTest {
@@ -65,16 +72,19 @@ pub fn generate_cmakelists(config: &Config) -> Result<String> {
                 .and_then(|s| s.to_str())
                 .unwrap_or("test");
             let safe_name = sanitize_to_c_identifier(base);
+            let mut link = vec![Value::Raw("gtest::gtest".into())];
+            if has_lib {
+                link.insert(0, Value::Str(lib_name.clone()));
+            } else {
+                link.insert(0, Value::Raw("${CONANDEPS_LEGACY}".into()));
+            }
             TestEntry {
                 exe_name: safe_name.clone(),
                 sources: vec![
                     cmake_list_dir_value(path),
                     Value::Raw("${C3PG_GTEST_MAIN}".into()),
                 ],
-                link: vec![
-                    Value::Str(lib_name.clone()),
-                    Value::Raw("gtest::gtest".into()),
-                ],
+                link,
                 prefix: format!("{base}."),
                 cxx_standard: Some(cxx_std),
             }
@@ -189,9 +199,13 @@ mod tests {
         assert!(output.contains("set(CMAKE_CXX_STANDARD_REQUIRED ON)"));
         assert!(output.contains("set(CMAKE_EXPORT_COMPILE_COMMANDS ON)"));
         assert!(output.contains("include(${CMAKE_BINARY_DIR}/conandeps_legacy.cmake)"));
-        assert!(output.contains("add_library(libMyProject STATIC)"));
         assert!(output.contains("add_executable(MyProject"));
         assert!(output.contains("${CMAKE_CURRENT_LIST_DIR}/../src/main.cpp"));
+
+        // Without library sources, executable links directly to Conan deps
+        // (no add_library since there are no lib-eligible source files)
+        assert!(!output.contains("add_library("));
+        assert!(output.contains("${CONANDEPS_LEGACY}"));
 
         // No test section when tests are disabled
         assert!(!output.contains("include(CTest)"));

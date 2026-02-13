@@ -83,9 +83,10 @@ pub fn testing_build(
         jobs.unwrap_or(1)
     );
     let test_target = format!("{}_tests", config.project.name);
+    let cache_dir = config.project.cache_dir.as_str();
     runner
         .command("cmake")
-        .args(["--build", "build", "--target", test_target.as_str(), "-j"])
+        .args(["--build", cache_dir, "--target", test_target.as_str(), "-j"])
         .stream_mode(tool_stream_mode(lvl))
         .run()?;
     Ok(())
@@ -108,7 +109,8 @@ pub fn testing_run(
         filter.unwrap_or_default(),
         jobs.unwrap_or(1)
     );
-    let mut args = vec!["--test-dir", "build", "--output-on-failure"];
+    let cache_dir = config.project.cache_dir.as_str();
+    let mut args = vec!["--test-dir", cache_dir, "--output-on-failure"];
     if let Some(f) = filter {
         args.extend(["-R", f]);
     }

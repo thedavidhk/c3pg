@@ -82,6 +82,7 @@ impl CMake {
         build_dir: &str,
         src_dir: &str,
         lvl: LevelFilter,
+        build_env: &[(String, String)],
     ) -> Result<()> {
         // ---- Step 1: cmake configure ----
         let mut conf_args = vec![
@@ -102,6 +103,7 @@ impl CMake {
         command_runner
             .command("cmake")
             .args(conf_args.iter().map(|s| s.as_str()))
+            .envs(build_env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
             .stream_mode(tool_stream_mode(lvl))
             .run()?
             .expect_success("Failed to configure with cmake")?;
@@ -117,13 +119,13 @@ impl CMake {
         command_runner
             .command("cmake")
             .args(build_args.iter().map(|s| s.as_str()))
+            .envs(build_env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
             .stream_mode(tool_stream_mode(lvl))
             .run()?
             .expect_success("Failed to build with cmake")?;
 
         Ok(())
     }
-
 }
 
 fn cmake_configure_verbosity_args(lvl: LevelFilter) -> &'static [&'static str] {
@@ -160,6 +162,7 @@ mod tests {
             "build_dir",
             "src_dir",
             LevelFilter::Info,
+            &[],
         );
 
         assert!(result.is_ok());
@@ -199,6 +202,7 @@ mod tests {
             "release_build_dir",
             "src_dir",
             LevelFilter::Info,
+            &[],
         );
 
         assert!(result.is_ok());

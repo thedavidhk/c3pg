@@ -57,8 +57,13 @@ pub fn binary_stream_mode(level: LevelFilter) -> StreamMode {
 }
 
 pub trait CommandRunner: Sized {
-    fn execute(&self, cmd: &str, args: &[&str], _mode: StreamMode)
-        -> anyhow::Result<CommandResult>;
+    fn execute(
+        &self,
+        cmd: &str,
+        args: &[&str],
+        mode: StreamMode,
+        env: &[(&str, &str)],
+    ) -> anyhow::Result<CommandResult>;
 
     fn command(&self, cmd: impl Into<String>) -> CommandBuilder<&Self> {
         CommandBuilder::new(self, cmd)
@@ -71,6 +76,7 @@ pub struct CommandBuilder<R: CommandRunner> {
     cmd: String,
     args: Vec<String>,
     mode: StreamMode,
+    env: Vec<(String, String)>,
 }
 
 impl<R: CommandRunner> CommandBuilder<R> {
@@ -80,6 +86,7 @@ impl<R: CommandRunner> CommandBuilder<R> {
             cmd: cmd.into(),
             args: Vec::new(),
             mode: StreamMode::Buffer,
+            env: Vec::new(),
         }
     }
 
@@ -97,9 +104,32 @@ impl<R: CommandRunner> CommandBuilder<R> {
         self
     }
 
+    /// Set an environment variable for the spawned process.
+    pub fn env(mut self, key: impl Into<String>, val: impl Into<String>) -> Self {
+        self.env.push((key.into(), val.into()));
+        self
+    }
+
+    /// Set multiple environment variables for the spawned process.
+    pub fn envs<I, K, V>(mut self, vars: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<String>,
+        V: Into<String>,
+    {
+        self.env
+            .extend(vars.into_iter().map(|(k, v)| (k.into(), v.into())));
+        self
+    }
+
     pub fn run(self) -> anyhow::Result<CommandResult> {
         let args: Vec<_> = self.args.iter().map(String::as_str).collect();
-        self.runner.execute(&self.cmd, &args, self.mode)
+        let env: Vec<(&str, &str)> = self
+            .env
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        self.runner.execute(&self.cmd, &args, self.mode, &env)
     }
 }
 
@@ -107,17 +137,24 @@ impl<R: CommandRunner> CommandBuilder<R> {
 pub struct SystemCommandRunner;
 
 impl CommandRunner for SystemCommandRunner {
-    fn execute(&self, cmd: &str, args: &[&str], mode: StreamMode) -> anyhow::Result<CommandResult> {
+    fn execute(
+        &self,
+        cmd: &str,
+        args: &[&str],
+        mode: StreamMode,
+        env: &[(&str, &str)],
+    ) -> anyhow::Result<CommandResult> {
         use std::io::{BufRead, BufReader, Write};
         use std::process::{Command, Stdio};
         use std::sync::{Arc, Mutex};
         use std::thread;
 
-        let mut child = Command::new(cmd)
-            .args(args)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
+        let mut command = Command::new(cmd);
+        command.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
+        for (k, v) in env {
+            command.env(k, v);
+        }
+        let mut child = command.spawn()?;
 
         let stdout_pipe = child.stdout.take();
         let stderr_pipe = child.stderr.take();
@@ -212,8 +249,14 @@ impl CommandRunner for SystemCommandRunner {
 }
 
 impl<T: CommandRunner + Sized> CommandRunner for &T {
-    fn execute(&self, cmd: &str, args: &[&str], mode: StreamMode) -> anyhow::Result<CommandResult> {
-        (*self).execute(cmd, args, mode)
+    fn execute(
+        &self,
+        cmd: &str,
+        args: &[&str],
+        mode: StreamMode,
+        env: &[(&str, &str)],
+    ) -> anyhow::Result<CommandResult> {
+        (*self).execute(cmd, args, mode, env)
     }
 }
 
@@ -263,6 +306,7 @@ mod tests {
             cmd: &str,
             args: &[&str],
             mode: StreamMode,
+            _env: &[(&str, &str)],
         ) -> anyhow::Result<CommandResult> {
             // Record invocation for the verbosity/mode tests
             *self.last_cmd.borrow_mut() = Some(cmd.to_string());
