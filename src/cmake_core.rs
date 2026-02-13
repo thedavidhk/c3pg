@@ -59,7 +59,6 @@ pub struct Target {
     compile_defs: ScopedList,
     compile_opts: ScopedList,
     link_libs: ScopedList,
-    features: ScopedList,
     properties: Vec<(String, Value)>,
 }
 
@@ -79,7 +78,6 @@ impl Target {
             compile_defs: ScopedList::default(),
             compile_opts: ScopedList::default(),
             link_libs: ScopedList::default(),
-            features: ScopedList::default(),
             properties: vec![],
         }
     }
@@ -135,7 +133,6 @@ impl Target {
 #[derive(Debug, Clone)]
 pub struct Project {
     pub name: String,
-    pub version: Option<String>,
     /// e.g. "3.21"
     pub cmake_min: String,
     pub languages: Vec<&'static str>, // e.g. ["C", "CXX"]
@@ -216,12 +213,6 @@ impl Project {
     }
 
     #[must_use]
-    pub fn version(mut self, v: impl Into<String>) -> Self {
-        self.version = Some(v.into());
-        self
-    }
-
-    #[must_use] 
     pub fn lang(mut self, langs: &[&'static str]) -> Self {
         self.languages = langs.to_vec();
         self
@@ -266,12 +257,6 @@ impl Project {
     #[must_use] 
     pub fn with_tests(mut self, suite: TestSuite) -> Self {
         self.tests = Some(suite);
-        self
-    }
-
-    #[must_use] 
-    pub fn languages(mut self, arg: &[&'static str; 1]) -> Self {
-        self.languages = arg.into();
         self
     }
 
@@ -395,7 +380,6 @@ impl Project {
             )?;
             emit_scoped_list(&mut out, "target_compile_options", &t.name, &t.compile_opts)?;
             emit_scoped_list(&mut out, "target_link_libraries", &t.name, &t.link_libs)?;
-            emit_scoped_list(&mut out, "target_compile_features", &t.name, &t.features)?;
 
             // target properties
             for (k, v) in &t.properties {
@@ -618,7 +602,6 @@ impl Default for Project {
     fn default() -> Self {
         Self {
             name: String::default(),
-            version: Some("0.1.0".to_string()),
             cmake_min: "3.21".to_string(),
             languages: vec!["CXX"],
             targets: Vec::default(),

@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use log::LevelFilter;
 use serde::{Deserialize, Serialize};
-use std::{fmt::Display, str::FromStr};
+use std::{fmt::Display, path::Path, str::FromStr};
 
 use crate::command_runner::{tool_stream_mode, CommandRunner};
 
@@ -85,20 +85,23 @@ impl CMake {
     pub fn build(
         command_runner: &impl CommandRunner,
         build_type: BuildType,
-        build_dir: &str,
-        src_dir: &str,
+        build_dir: &Path,
+        src_dir: &Path,
         lvl: LevelFilter,
         build_env: &[(String, String)],
     ) -> Result<()> {
+        let build_dir_str = build_dir.display().to_string();
+        let src_dir_str = src_dir.display().to_string();
+        let toolchain = build_dir.join("conan_toolchain.cmake");
+
         // ---- Step 1: cmake configure ----
         let mut conf_args = vec![
             "-B".into(),
-            build_dir.into(),
-            "-DCMAKE_TOOLCHAIN_FILE=conan_toolchain.cmake".into(),
-            format!("-DCMAKE_BUILD_TYPE={}", build_type),
-            "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON".into(),
+            build_dir_str.clone(),
+            format!("-DCMAKE_TOOLCHAIN_FILE={}", toolchain.display()),
+            format!("-DCMAKE_BUILD_TYPE={build_type}"),
             "-S".into(),
-            src_dir.into(),
+            src_dir_str,
         ];
         conf_args.extend(
             cmake_configure_verbosity_args(lvl)
@@ -115,7 +118,7 @@ impl CMake {
             .expect_success("Failed to configure with cmake")?;
 
         // ---- Step 2: cmake --build ----
-        let mut build_args = vec!["--build".into(), build_dir.into()];
+        let mut build_args = vec!["--build".into(), build_dir_str];
         build_args.extend(
             cmake_build_verbosity_args(lvl)
                 .iter()
@@ -156,6 +159,7 @@ fn cmake_build_verbosity_args(lvl: LevelFilter) -> &'static [&'static str] {
 mod tests {
     use super::*;
     use crate::test_utils::MockCommandRunner;
+    use std::path::Path;
 
     #[test]
     fn test_cmake_build() {
@@ -164,8 +168,8 @@ mod tests {
         let result = CMake::build(
             &mock_runner,
             BuildType::Debug,
-            "build_dir",
-            "src_dir",
+            Path::new("build_dir"),
+            Path::new("src_dir"),
             LevelFilter::Info,
             &[],
         );
@@ -182,9 +186,8 @@ mod tests {
             vec![
                 "-B",
                 "build_dir",
-                "-DCMAKE_TOOLCHAIN_FILE=conan_toolchain.cmake",
+                "-DCMAKE_TOOLCHAIN_FILE=build_dir/conan_toolchain.cmake",
                 "-DCMAKE_BUILD_TYPE=Debug",
-                "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
                 "-S",
                 "src_dir",
                 "--log-level",
@@ -204,8 +207,8 @@ mod tests {
         let result = CMake::build(
             &mock_runner,
             BuildType::Release,
-            "release_build_dir",
-            "src_dir",
+            Path::new("release_build_dir"),
+            Path::new("src_dir"),
             LevelFilter::Info,
             &[],
         );

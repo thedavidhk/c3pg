@@ -50,6 +50,13 @@ fn e2e_new_build_run() {
     assert!(project.join("build/CMakeLists.txt").exists());
     assert!(project.join("build/conanfile.py").exists());
 
+    // New projects should not contain gtest (lazy setup via `test add`)
+    let config = fs::read_to_string(project.join("c3pg.toml")).unwrap();
+    assert!(
+        !config.contains("gtest"),
+        "Fresh project should not have gtest dependency"
+    );
+
     // --- c3pg build ---------------------------------------------------------
     c3pg()
         .args(["build"])
@@ -78,6 +85,13 @@ fn e2e_new_build_run() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Hello from C3PG!"));
+
+    // --- c3pg build --release -----------------------------------------------
+    c3pg()
+        .args(["build", "--release"])
+        .current_dir(&project)
+        .assert()
+        .success();
 }
 
 // ---------------------------------------------------------------------------
@@ -160,7 +174,14 @@ fn e2e_test_add_and_run() {
 
     let project = tmp.path().join("testproj");
 
-    // Add a test
+    // Running `test` without any test files should not fail
+    c3pg()
+        .args(["test"])
+        .current_dir(&project)
+        .assert()
+        .success();
+
+    // Add a test (this lazily adds gtest)
     c3pg()
         .args(["test", "add", "math"])
         .current_dir(&project)
@@ -168,6 +189,13 @@ fn e2e_test_add_and_run() {
         .success();
 
     assert!(project.join("tests/test_math.cpp").exists());
+
+    // Config should now contain gtest
+    let config = fs::read_to_string(project.join("c3pg.toml")).unwrap();
+    assert!(
+        config.contains("gtest"),
+        "Expected gtest in config after `test add`, got:\n{config}"
+    );
 
     // Run tests (build + ctest)
     c3pg()

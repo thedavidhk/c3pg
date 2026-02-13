@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
 
     // Project (general knobs via set_var + include)
     let txt = Project::new("examples")
-        .languages(&["CXX"])
+        .lang(&["CXX"])
         .set_var("CMAKE_CXX_STANDARD", "20")
         .set_on("CMAKE_CXX_STANDARD_REQUIRED")
         .set_on("CMAKE_EXPORT_COMPILE_COMMANDS")

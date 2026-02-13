@@ -3,6 +3,7 @@ use heck::ToPascalCase;
 use log::LevelFilter;
 use semver::Version;
 use std::fmt;
+use std::path::Path;
 use std::str::FromStr;
 
 use crate::command_runner::{tool_stream_mode, CommandRunner};
@@ -141,16 +142,17 @@ impl Conan {
 
     fn get_first_remote(runner: impl CommandRunner, bin: &str) -> Result<String> {
         let command = runner.command(bin).args(["remote", "list"]).run()?;
-        let remote = command
+        let remote_name = command
             .stdout
             .lines()
-            .next()
-            .ok_or(anyhow!("remotes list is empty"))?;
-        let remote_name = remote
-            .split(':')
-            .next()
-            .ok_or(anyhow!("remote not found"))?;
-        Ok(String::from(remote_name))
+            .find(|l| !l.trim().is_empty())
+            .ok_or(anyhow!(
+                "no Conan remotes configured -- run `conan remote add` first"
+            ))?
+            .split_once(':')
+            .map(|(name, _)| name.trim().to_string())
+            .ok_or(anyhow!("unexpected Conan remote list format"))?;
+        Ok(remote_name)
     }
 }
 
@@ -189,37 +191,57 @@ class {class_name}(ConanFile):
     }
 }
 
-/// Parse Conan-generated build-environment scripts (`conanbuildenv-*.sh`)
-/// in `cache_dir` and return any `CC` / `CXX` (or other `export VAR=val`)
-/// entries as `(key, value)` pairs.
+/// Parse Conan-generated build-environment scripts in `cache_dir` and return
+/// any compiler-related environment variables (`CC`, `CXX`, etc.) as
+/// `(key, value)` pairs.
+///
+/// On Unix, this reads `conanbuildenv-*.sh` files and parses `export VAR=val`
+/// lines.  On Windows, it reads `conanbuildenv-*.bat` files and parses
+/// `set "VAR=val"` lines.
 ///
 /// These are typically needed so cmake picks up the same compiler that
 /// Conan was configured for.
-#[must_use] 
-pub fn parse_conan_build_env(cache_dir: &str) -> Vec<(String, String)> {
+#[must_use]
+pub fn parse_conan_build_env(cache_dir: &Path) -> Vec<(String, String)> {
     use std::fs;
-    use std::path::Path;
 
-    let dir = Path::new(cache_dir);
     let mut env = Vec::new();
 
-    let Ok(entries) = fs::read_dir(dir) else {
+    let Ok(entries) = fs::read_dir(cache_dir) else {
         return env;
     };
 
     for entry in entries.flatten() {
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if name.starts_with("conanbuildenv-") && name.ends_with(".sh") {
-            if let Ok(contents) = fs::read_to_string(entry.path()) {
-                for line in contents.lines() {
-                    // Match lines like: export CC="clang"  or  export CXX=clang++
-                    let line = line.trim();
-                    if let Some(rest) = line.strip_prefix("export ") {
+        let is_env_script = if cfg!(windows) {
+            name.starts_with("conanbuildenv-") && name.ends_with(".bat")
+        } else {
+            name.starts_with("conanbuildenv-") && name.ends_with(".sh")
+        };
+        if !is_env_script {
+            continue;
+        }
+        let Ok(contents) = fs::read_to_string(entry.path()) else {
+            continue;
+        };
+        for line in contents.lines() {
+            let line = line.trim();
+            if cfg!(windows) {
+                // Match lines like: set "CC=cl.exe"
+                if let Some(rest) = line.strip_prefix("set \"") {
+                    if let Some(rest) = rest.strip_suffix('"') {
                         if let Some((key, val)) = rest.split_once('=') {
-                            let val = val.trim_matches('"').trim_matches('\'');
                             env.push((key.to_string(), val.to_string()));
                         }
+                    }
+                }
+            } else {
+                // Match lines like: export CC="clang"  or  export CXX=clang++
+                if let Some(rest) = line.strip_prefix("export ") {
+                    if let Some((key, val)) = rest.split_once('=') {
+                        let val = val.trim_matches('"').trim_matches('\'');
+                        env.push((key.to_string(), val.to_string()));
                     }
                 }
             }
@@ -246,7 +268,8 @@ mod tests {
 
     #[test]
     fn test_conan_from_config_with_remote_fallback() {
-        let mock_runner = MockCommandRunner::new(Some("default_remote".to_string()));
+        let mock_runner =
+            MockCommandRunner::new(Some("default_remote: https://example.com [Enabled]".to_string()));
 
         let config = Config {
             project: crate::config::Project {

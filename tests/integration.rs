@@ -87,7 +87,7 @@ fn test_new_with_git() {
 }
 
 #[test]
-fn test_new_adds_gtest_dependency() {
+fn test_new_has_no_gtest_dependency() {
     let tmp = TempDir::new().unwrap();
     let runner = mock_with_conan_responses();
 
@@ -97,16 +97,16 @@ fn test_new_adds_gtest_dependency() {
 
     let root = tmp.path().join("testgtest");
 
-    // Config should contain gtest
+    // Config should NOT contain gtest (it's added lazily via `test add`)
     let config = c3pg::config::Config::from_file(root.join("c3pg.toml")).unwrap();
     assert!(
-        config.project.dependencies.iter().any(|d| d.name == "gtest"),
-        "Expected gtest in dependencies, got: {:?}",
+        !config.project.dependencies.iter().any(|d| d.name == "gtest"),
+        "Expected no gtest in dependencies for a fresh project, got: {:?}",
         config.project.dependencies
     );
 
-    // conanfile.py should reference gtest
-    assert_file_contains(&root.join("build/conanfile.py"), "self.requires(\"gtest/1.15.0\")");
+    // conanfile.py should not have a gtest requires line
+    assert_file_not_contains(&root.join("build/conanfile.py"), "self.requires(\"gtest");
 }
 
 #[test]
@@ -344,9 +344,6 @@ fn test_test_add_creates_file() {
     let (tmp, _) = setup_project_dir("testadd");
     let runner = mock_with_conan_responses();
 
-    // Pre-create the tests directory since the mock mkdir won't do it
-    fs::create_dir_all(tmp.path().join("tests")).unwrap();
-
     let args = TestArgs {
         filter: None,
         jobs: None,
@@ -359,11 +356,19 @@ fn test_test_add_creates_file() {
         cmd_test(&runner, args, LevelFilter::Info).unwrap();
     });
 
-    // Should have created tests/test_math.cpp
+    // Should have created tests/test_math.cpp (and the tests/ directory)
     let test_file = tmp.path().join("tests/test_math.cpp");
     assert_file_exists(&test_file);
     assert_file_contains(&test_file, "#include <gtest/gtest.h>");
     assert_file_contains(&test_file, "TEST(math, hello_test)");
+
+    // Gtest should have been lazily added to dependencies
+    let config = read_config(tmp.path());
+    assert!(
+        config.project.dependencies.iter().any(|d| d.name == "gtest"),
+        "Expected gtest in dependencies after test add, got: {:?}",
+        config.project.dependencies
+    );
 }
 
 #[test]
@@ -371,7 +376,7 @@ fn test_test_add_skips_existing() {
     let (tmp, _) = setup_project_dir("testskip");
     let runner = mock_with_conan_responses();
 
-    // Pre-create the test file with custom content
+    // Pre-create the test file with custom content (dir + file)
     fs::create_dir_all(tmp.path().join("tests")).unwrap();
     let test_file = tmp.path().join("tests/test_existing.cpp");
     fs::write(&test_file, "// my custom test\n").unwrap();
@@ -398,6 +403,10 @@ fn test_test_run_invokes_cmake_and_ctest() {
     let (tmp, _) = setup_project_dir("testrun");
     let runner = mock_with_conan_responses();
 
+    // Create a test file so auto-detection finds it
+    fs::create_dir_all(tmp.path().join("tests")).unwrap();
+    fs::write(tmp.path().join("tests/test_hello.cpp"), "// test\n").unwrap();
+
     let args = TestArgs {
         filter: None,
         jobs: None,
@@ -420,6 +429,10 @@ fn test_test_run_with_filter_and_jobs() {
     let (tmp, _) = setup_project_dir("testfilter");
     let runner = mock_with_conan_responses();
 
+    // Create a test file so auto-detection finds it
+    fs::create_dir_all(tmp.path().join("tests")).unwrap();
+    fs::write(tmp.path().join("tests/test_math.cpp"), "// test\n").unwrap();
+
     let args = TestArgs {
         filter: Some("math".to_string()),
         jobs: Some(4),
@@ -432,6 +445,28 @@ fn test_test_run_with_filter_and_jobs() {
 
     // ctest should have the filter and jobs args
     runner.assert_ran("ctest", &["--test-dir", "build", "-R", "math", "-j", "4"]);
+}
+
+#[test]
+fn test_test_run_with_no_tests_prints_message() {
+    let (tmp, _) = setup_project_dir("notests");
+    let runner = mock_with_conan_responses();
+
+    let args = TestArgs {
+        filter: None,
+        jobs: None,
+        command: None,
+    };
+
+    // No test files exist => should return Ok without running cmake/ctest
+    let result = with_cwd(tmp.path(), || {
+        cmd_test(&runner, args, LevelFilter::Info)
+    });
+    assert!(result.is_ok());
+
+    // Should NOT have run cmake or ctest
+    runner.assert_did_not_run("cmake");
+    runner.assert_did_not_run("ctest");
 }
 
 // ---------------------------------------------------------------------------

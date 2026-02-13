@@ -57,6 +57,14 @@ impl Project {
     fn is_default_cache_dir(dir: &String) -> bool {
         *dir == Self::default().cache_dir
     }
+
+    pub fn add_dependency(&mut self, dep: Dependency) {
+        if let Some(existing) = self.dependencies.iter_mut().find(|d| d.name == dep.name) {
+            *existing = dep;
+        } else {
+            self.dependencies.push(dep);
+        }
+    }
 }
 
 impl Default for Project {
@@ -88,21 +96,11 @@ where
         .collect()
 }
 
-impl Project {
-    pub fn add_dependency(&mut self, dep: Dependency) {
-        if let Some(existing) = self.dependencies.iter_mut().find(|d| d.name == dep.name) {
-            *existing = dep;
-        } else {
-            self.dependencies.push(dep);
-        }
-    }
-}
-
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(default)]
 pub struct CMakeConfig {
     pub standard: CppStandard,
     pub export_compile_commands: bool,
-    pub silent: bool,
 }
 
 impl Default for CMakeConfig {
@@ -110,16 +108,15 @@ impl Default for CMakeConfig {
         Self {
             standard: CppStandard::default(),
             export_compile_commands: true,
-            silent: false,
         }
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ConanConfig {
     pub bin: String,
     pub remote: Option<String>,
-    pub silent: bool,
 }
 
 impl Default for ConanConfig {
@@ -127,23 +124,19 @@ impl Default for ConanConfig {
         Self {
             bin: "conan".to_string(),
             remote: None,
-            silent: false,
         }
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TestingConfig {
-    pub enabled: bool,
-    pub link: bool,
     pub dir: String,
 }
 
 impl Default for TestingConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
-            link: false,
             dir: "tests".to_string(),
         }
     }
@@ -164,6 +157,35 @@ mod tests {
         let project: Project = toml::from_str(toml_data)?;
         assert!(project.cache_dir == "build");
 
+        Ok(())
+    }
+
+    /// Verify that old config files with removed fields (`silent`, `enabled`,
+    /// `link`) still deserialize correctly.
+    #[test]
+    fn test_backwards_compatible_deserialization() -> Result<()> {
+        let toml_data = r#"
+[project]
+name = "legacy"
+dependencies = []
+
+[cmake]
+standard = "Cpp20"
+export_compile_commands = true
+silent = false
+
+[conan]
+bin = "conan"
+silent = true
+
+[testing]
+enabled = true
+link = false
+dir = "tests"
+"#;
+        let config: Config = toml::from_str(toml_data)?;
+        assert_eq!(config.project.name, "legacy");
+        assert_eq!(config.testing.dir, "tests");
         Ok(())
     }
 

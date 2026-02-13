@@ -29,8 +29,7 @@ use crate::{
 /// # Errors
 ///
 /// Returns an error if directory creation fails, config files cannot be
-/// written, the default `gtest` dependency cannot be resolved, or `git init`
-/// fails when `git` is `true`.
+/// written, or `git init` fails when `git` is `true`.
 pub fn cmd_new(
     runner: impl CommandRunner,
     sandbox_name: &str,
@@ -55,16 +54,10 @@ int main() {
 "#;
     fs::write(src_dir.join("main.cpp"), main_cpp_content).context("Could not write to main.cpp")?;
 
-    // 3. Write minimal config files
+    // 3. Write minimal config files (no gtest -- added lazily via `c3pg test add`)
     config.project.name = sandbox_name.to_string();
     config.cmake.standard = standard;
-    fs::write(
-        cache_dir.join("CMakeLists.txt"),
-        cmake_gen::generate_cmakelists(&config)?,
-    )
-    .context("Could not write CMakeLists.txt")?;
-    Conan::from_config(&runner, &config)?.to_file(cache_dir.join("conanfile.py"))?;
-    find_and_add_dependency(&runner, "gtest", &mut config, &project_path)?;
+    write_build_files(&runner, &config, &cache_dir)?;
     config.to_file(project_path.join("c3pg.toml"))?;
 
     if git {
@@ -95,7 +88,8 @@ int main() {
 pub fn cmd_add(runner: impl CommandRunner, expr: &str) -> Result<()> {
     let mut config = build_config(&runner)?;
     find_and_add_dependency(&runner, expr, &mut config, Path::new("."))?;
-    config.to_file("c3pg.toml")
+    config.to_file("c3pg.toml")?;
+    Ok(())
 }
 
 /// Remove a Conan dependency from the current project.
@@ -111,25 +105,19 @@ pub fn cmd_remove(runner: impl CommandRunner, expr: &str) -> Result<()> {
         .project
         .dependencies
         .retain(|dep| dep.name.as_str() != expr);
-    let len_after = config.project.dependencies.len();
 
-    let cache_dir = PathBuf::from(&config.project.cache_dir);
-    let conanfile_path = cache_dir.join("conanfile.py");
-    let cmake_path = cache_dir.join("CMakeLists.txt");
-    Conan::from_config(&runner, &config)?.to_file(conanfile_path)?;
-    fs::write(&cmake_path, cmake_gen::generate_cmakelists(&config)?)
-        .context("Could not write CMakeLists.txt")?;
-    config.to_file("c3pg.toml")?;
-
-    if len_before == len_after {
+    if config.project.dependencies.len() == len_before {
         bail!(
             "Dependency {} not found in project. Not removing anything...",
             expr
         );
     }
 
-    info!("Removed dependency {expr}");
+    let cache_dir = PathBuf::from(&config.project.cache_dir);
+    write_build_files(&runner, &config, &cache_dir)?;
+    config.to_file("c3pg.toml")?;
 
+    info!("Removed dependency {expr}");
     Ok(())
 }
 
@@ -147,20 +135,29 @@ pub fn cmd_build(
     lvl: LevelFilter,
 ) -> Result<()> {
     let config = build_config(&runner)?;
-    let cache_dir = config.project.cache_dir.as_str();
+    cmd_build_inner(&runner, &config, build_type, lvl)
+}
 
-    Conan::from_config(&runner, &config)?.install(
-        &runner,
-        cache_dir,
-        cache_dir,
+fn cmd_build_inner(
+    runner: &impl CommandRunner,
+    config: &Config,
+    build_type: BuildType,
+    lvl: LevelFilter,
+) -> Result<()> {
+    let cache_dir = PathBuf::from(&config.project.cache_dir);
+
+    Conan::from_config(runner, config)?.install(
+        runner,
+        &cache_dir.display().to_string(),
+        &cache_dir.display().to_string(),
         build_type,
         lvl,
     )?;
 
     // Read the build environment (CC, CXX, ...) that Conan generated so
     // cmake picks up the correct compiler.
-    let build_env = conan::parse_conan_build_env(cache_dir);
-    CMake::build(&runner, build_type, cache_dir, cache_dir, lvl, &build_env)?;
+    let build_env = conan::parse_conan_build_env(&cache_dir);
+    CMake::build(runner, build_type, &cache_dir, &cache_dir, lvl, &build_env)?;
 
     info!("Build successful!\n");
     Ok(())
@@ -175,13 +172,15 @@ pub fn cmd_build(
 /// Returns an error if the build step fails or the compiled binary cannot
 /// be executed.
 pub fn cmd_run(runner: impl CommandRunner, build_type: BuildType, lvl: LevelFilter) -> Result<()> {
-    cmd_build(&runner, build_type, lvl)?;
+    // Load config once; cmd_build_with_config avoids a second load.
     let config = build_config(&runner)?;
-    let cache_dir = PathBuf::from(config.project.cache_dir);
+    cmd_build_inner(&runner, &config, build_type, lvl)?;
+
+    let cache_dir = PathBuf::from(&config.project.cache_dir);
     let binary_name = if cfg!(target_os = "windows") {
         format!("{}.exe", config.project.name)
     } else {
-        config.project.name
+        config.project.name.clone()
     };
 
     let binary_path = cache_dir.join(binary_name);
@@ -198,24 +197,44 @@ pub fn cmd_run(runner: impl CommandRunner, build_type: BuildType, lvl: LevelFilt
 
 /// Run or manage the project's test suite.
 ///
-/// With a subcommand (e.g. `add`), creates a new test file. Without one,
-/// builds and runs the test suite via `cmake` and `ctest`.
+/// With a subcommand (e.g. `add`), creates a new test file and lazily adds
+/// gtest if it is not already a dependency. Without a subcommand, builds
+/// and runs the test suite via `cmake` and `ctest`.
 ///
 /// # Errors
 ///
 /// Returns an error if the project config cannot be loaded, the test file
 /// cannot be created, or the test build/run fails.
 pub fn cmd_test(runner: impl CommandRunner, args: TestArgs, lvl: LevelFilter) -> Result<()> {
-    let config = build_config(&runner)?;
-    match args.command {
-        Some(command) => match command {
-            crate::cli::TestOnlySubcmds::Add { name } => {
-                testing_add(runner, lvl, &config.testing, &name)?;
-            }
-        },
-        None => testing_run(runner, lvl, &config, args.filter.as_deref(), args.jobs)?,
+    let mut config = build_config(&runner)?;
+    if let Some(crate::cli::TestOnlySubcmds::Add { name }) = args.command {
+        // Lazily add gtest on first test creation
+        if !config
+            .project
+            .dependencies
+            .iter()
+            .any(|d| d.name == "gtest")
+        {
+            find_and_add_dependency(&runner, "gtest", &mut config, Path::new("."))?;
+        }
+        testing_add(&config.testing, &name)?;
+        // Regenerate build files to pick up the new test file
+        let cache_dir = PathBuf::from(&config.project.cache_dir);
+        write_build_files(&runner, &config, &cache_dir)?;
+        config.to_file("c3pg.toml")?;
+    } else {
+        // Auto-detect: only run if test files exist
+        let test_dir = Path::new(&config.testing.dir);
+        if !test_dir.is_dir()
+            || fs::read_dir(test_dir)
+                .map(|rd| rd.count() == 0)
+                .unwrap_or(true)
+        {
+            info!("No tests found. Use `c3pg test add <name>` to create one.");
+            return Ok(());
+        }
+        testing_run(runner, lvl, &config, args.filter.as_deref(), args.jobs)?;
     }
-    config.to_file("c3pg.toml")?;
     Ok(())
 }
 
@@ -250,34 +269,40 @@ pub fn cmd_clean(runner: impl CommandRunner) -> Result<()> {
 /// Returns an error if no matching dependency is found in the configured
 /// remotes, or if the generated config files cannot be written.
 pub fn find_and_add_dependency(
-    runner: impl CommandRunner,
+    runner: &impl CommandRunner,
     expr: &str,
     config: &mut Config,
     project_root: &Path,
 ) -> Result<()> {
-    // Find dependency
-    let dependency = Conan::from_config(&runner, config)?
-        .get_latest_matching_dependency(&runner, expr)?
+    let dependency = Conan::from_config(runner, config)?
+        .get_latest_matching_dependency(runner, expr)?
         .ok_or(anyhow!("Could not find dependency {} in remotes", expr))?;
 
-    // 1. Read and parse existing conanfile.py and CMakeLists.txt
-    let cache_dir = project_root.join(&config.project.cache_dir);
-    let conanfile_path = cache_dir.join("conanfile.py");
-    let cmake_path = cache_dir.join("CMakeLists.txt");
-
-    // 2. Add dependency
     config.project.add_dependency(dependency.clone());
-    Conan::from_config(&runner, config)?
-        .to_file(conanfile_path)
-        .with_context(|| "Could not write conan config")?;
-    fs::write(&cmake_path, cmake_gen::generate_cmakelists(config)?)
-        .with_context(|| "Could not write CMakeLists.txt")?;
+
+    let cache_dir = project_root.join(&config.project.cache_dir);
+    write_build_files(runner, config, &cache_dir)?;
 
     info!("Added dependency '{dependency}'");
     Ok(())
 }
 
-fn build_config(runner: impl CommandRunner) -> Result<Config> {
+/// Regenerate `conanfile.py` and `CMakeLists.txt` in `cache_dir` from `config`.
+fn write_build_files(
+    runner: &impl CommandRunner,
+    config: &Config,
+    cache_dir: &Path,
+) -> Result<()> {
+    Conan::from_config(runner, config)?.to_file(cache_dir.join("conanfile.py"))?;
+    fs::write(
+        cache_dir.join("CMakeLists.txt"),
+        cmake_gen::generate_cmakelists(config)?,
+    )
+    .context("Could not write CMakeLists.txt")?;
+    Ok(())
+}
+
+fn build_config(runner: &impl CommandRunner) -> Result<Config> {
     let config_file = PathBuf::from("c3pg.toml");
     let legacy_file = PathBuf::from("cpppg.toml");
     let config = match Config::from_file(&config_file) {
@@ -287,31 +312,7 @@ fn build_config(runner: impl CommandRunner) -> Result<Config> {
         }
     };
     let cache_dir = PathBuf::from(&config.project.cache_dir);
-    if !cache_dir.is_dir() {
-        fs::create_dir_all(&cache_dir)?;
-    }
-    let conanfile_path = cache_dir.join("conanfile.py");
-    let cmake_path = cache_dir.join("CMakeLists.txt");
-
-    // Ensure config files are regenerated if missing or outdated
-    let config_modified = fs::metadata(config_file)?.modified()?;
-    if conanfile_path.exists() {
-        let conanfile_modified = fs::metadata(&conanfile_path)?.modified()?;
-        if conanfile_modified < config_modified {
-            Conan::from_config(&runner, &config)?.to_file(&conanfile_path)?;
-        }
-    } else {
-        Conan::from_config(&runner, &config)?.to_file(&conanfile_path)?;
-    }
-
-    if cmake_path.exists() {
-        let cmake_modified = fs::metadata(&cmake_path)?.modified()?;
-        if cmake_modified < config_modified {
-            fs::write(&cmake_path, cmake_gen::generate_cmakelists(&config)?)?;
-        }
-    } else {
-        fs::write(&cmake_path, cmake_gen::generate_cmakelists(&config)?)?;
-    }
-
+    fs::create_dir_all(&cache_dir)?;
+    write_build_files(runner, &config, &cache_dir)?;
     Ok(config)
 }

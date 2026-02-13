@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::{fmt, str::FromStr};
+use std::{fmt, str::FromStr, sync::OnceLock};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Dependency {
@@ -21,10 +21,13 @@ impl Dependency {
 
 impl FromStr for Dependency {
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        let re = Regex::new(
-            r"^\s*(?P<name>[^/]+)(?:/(?P<version>[^@#:]+))?(?:@(?P<channel>[^#:]+))?(?::|#)?.*$",
-        )
-        .expect("Could not create regex (this should not happen).");
+        static RE: OnceLock<Regex> = OnceLock::new();
+        let re = RE.get_or_init(|| {
+            Regex::new(
+                r"^\s*(?P<name>[^/]+)(?:/(?P<version>[^@#:]+))?(?:@(?P<channel>[^#:]+))?(?::|#)?.*$",
+            )
+            .expect("Could not create regex (this should not happen).")
+        });
 
         let captures = re.captures(s).ok_or_else(|| anyhow!("Did not match"))?;
 

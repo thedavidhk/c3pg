@@ -148,7 +148,6 @@ impl<R: CommandRunner> CommandBuilder<R> {
     }
 }
 
-#[derive()]
 pub struct SystemCommandRunner;
 
 impl CommandRunner for SystemCommandRunner {

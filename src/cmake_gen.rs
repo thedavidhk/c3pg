@@ -22,18 +22,22 @@ pub fn generate_cmakelists(config: &Config) -> Result<String> {
     let lib_name = format!("lib{project_name}");
     let std_str = config.cmake.standard.to_string();
 
+    // Compute the relative path from cache_dir back to the project root.
+    // E.g. "build" → "..", "build/debug" → "../.."
+    let project_root_ref = cmake_project_root_ref(&config.project.cache_dir);
+
     // Discover source files, making them relative to the CMakeLists.txt location
     let all_sources = find_files("src", &SOURCE_EXTENSIONS);
     let lib_sources: Vec<Value> = all_sources
         .iter()
         .filter(|p| !p.ends_with("main.cpp"))
-        .map(|p| cmake_list_dir_value(p))
+        .map(|p| project_root_value(&project_root_ref, p))
         .collect();
 
     let has_lib = !lib_sources.is_empty();
 
     let mut project = Project::new(project_name)
-        .languages(&["CXX"])
+        .lang(&["CXX"])
         .set_var("CMAKE_CXX_STANDARD", std_str.as_str())
         .set_on("CMAKE_CXX_STANDARD_REQUIRED")
         .set_var(
@@ -51,17 +55,19 @@ pub fn generate_cmakelists(config: &Config) -> Result<String> {
             .srcs(lib_sources)
             .link(PRIVATE, Value::Raw("${CONANDEPS_LEGACY}".into()));
         let app = Target::executable(project_name)
-            .src(cmake_list_dir_value("src/main.cpp"))
+            .src(project_root_value(&project_root_ref, "src/main.cpp"))
             .link(PRIVATE, &lib_name);
         project = project.target(lib).target(app);
     } else {
         let app = Target::executable(project_name)
-            .src(cmake_list_dir_value("src/main.cpp"))
+            .src(project_root_value(&project_root_ref, "src/main.cpp"))
             .link(PRIVATE, Value::Raw("${CONANDEPS_LEGACY}".into()));
         project = project.target(app);
     }
 
-    if config.testing.enabled {
+    // Auto-detect: emit test section when test source files exist
+    let test_files = find_files(&config.testing.dir, &SOURCE_EXTENSIONS);
+    if !test_files.is_empty() {
         let gtest = TestFramework::GoogleTest {
             config_mode: true,
             inline_main_var: "C3PG_GTEST_MAIN".into(),
@@ -69,7 +75,6 @@ pub fn generate_cmakelists(config: &Config) -> Result<String> {
             discover_mode: DiscoverMode::PreTest,
         };
 
-        let test_files = find_files(&config.testing.dir, &SOURCE_EXTENSIONS);
         let cxx_std: u16 = std_str.parse().unwrap_or(20);
 
         let entries = test_files.iter().map(|path| {
@@ -87,7 +92,7 @@ pub fn generate_cmakelists(config: &Config) -> Result<String> {
             TestEntry {
                 exe_name: safe_name.clone(),
                 sources: vec![
-                    cmake_list_dir_value(path),
+                    project_root_value(&project_root_ref, path),
                     Value::Raw("${C3PG_GTEST_MAIN}".into()),
                 ],
                 link,
@@ -118,12 +123,22 @@ int main(int argc, char** argv) {
 
 const SOURCE_EXTENSIONS: [&str; 4] = ["c", "cpp", "cxx", "cc"];
 
-/// Wrap a project-root-relative path as `${CMAKE_CURRENT_LIST_DIR}/../<path>`.
+/// Compute the `${CMAKE_CURRENT_LIST_DIR}/..` prefix that navigates from
+/// `cache_dir` back to the project root.  For `cache_dir = "build"` this
+/// returns `"${CMAKE_CURRENT_LIST_DIR}/.."`, for `"build/debug"` it returns
+/// `"${CMAKE_CURRENT_LIST_DIR}/../.."`, etc.
+fn cmake_project_root_ref(cache_dir: &str) -> String {
+    let depth = Path::new(cache_dir).components().count();
+    let ups = std::iter::repeat_n("..", depth).collect::<Vec<_>>().join("/");
+    format!("${{CMAKE_CURRENT_LIST_DIR}}/{ups}")
+}
+
+/// Wrap a project-root-relative path using the computed root reference.
 ///
-/// The generated CMakeLists.txt lives inside the cache/build directory, so all
+/// The generated `CMakeLists.txt` lives inside the cache/build directory, so all
 /// references to project files need this prefix to resolve correctly.
-fn cmake_list_dir_value(path: &str) -> Value {
-    Value::Raw(format!("${{CMAKE_CURRENT_LIST_DIR}}/../{path}"))
+fn project_root_value(project_root_ref: &str, path: &str) -> Value {
+    Value::Raw(format!("{project_root_ref}/{path}"))
 }
 
 /// Walk a directory tree and return paths (relative to CWD) of files whose
@@ -171,7 +186,7 @@ mod tests {
         config::{CMakeConfig, ConanConfig, Config, TestingConfig},
     };
 
-    fn test_config(name: &str, standard: CppStandard, tests_enabled: bool) -> Config {
+    fn test_config(name: &str, standard: CppStandard) -> Config {
         Config {
             project: crate::config::Project {
                 name: name.to_string(),
@@ -181,20 +196,15 @@ mod tests {
             cmake: CMakeConfig {
                 standard,
                 export_compile_commands: true,
-                silent: false,
             },
             conan: ConanConfig::default(),
-            testing: TestingConfig {
-                enabled: tests_enabled,
-                link: false,
-                dir: "tests".to_string(),
-            },
+            testing: TestingConfig::default(),
         }
     }
 
     #[test]
     fn test_generate_basic_project() {
-        let config = test_config("MyProject", CppStandard::Cpp20, false);
+        let config = test_config("MyProject", CppStandard::Cpp20);
         let output = generate_cmakelists(&config).unwrap();
 
         assert!(output.contains("cmake_minimum_required(VERSION 3.21)"));
@@ -204,6 +214,7 @@ mod tests {
         assert!(output.contains("set(CMAKE_EXPORT_COMPILE_COMMANDS ON)"));
         assert!(output.contains("include(${CMAKE_BINARY_DIR}/conandeps_legacy.cmake)"));
         assert!(output.contains("add_executable(MyProject"));
+        // Source paths use the computed project root reference
         assert!(output.contains("${CMAKE_CURRENT_LIST_DIR}/../src/main.cpp"));
 
         // Without library sources, executable links directly to Conan deps
@@ -211,14 +222,14 @@ mod tests {
         assert!(!output.contains("add_library("));
         assert!(output.contains("${CONANDEPS_LEGACY}"));
 
-        // No test section when tests are disabled
+        // No test section when no test files exist
         assert!(!output.contains("include(CTest)"));
         assert!(!output.contains("enable_testing()"));
     }
 
     #[test]
     fn test_generate_with_cpp17_and_no_export() {
-        let mut config = test_config("NoDepsProject", CppStandard::Cpp17, false);
+        let mut config = test_config("NoDepsProject", CppStandard::Cpp17);
         config.cmake.export_compile_commands = false;
         let output = generate_cmakelists(&config).unwrap();
 
@@ -228,16 +239,15 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_with_tests_enabled() {
-        let config = test_config("TestProject", CppStandard::Cpp20, true);
-        let output = generate_cmakelists(&config).unwrap();
-
-        assert!(output.contains("include(CTest)"));
-        assert!(output.contains("enable_testing()"));
-        assert!(output.contains("find_package(GTest CONFIG REQUIRED)"));
-        assert!(output.contains("include(GoogleTest)"));
-        assert!(output.contains("add_custom_target(TestProject_tests)"));
-        assert!(output.contains("C3PG_GTEST_MAIN"));
+    fn test_cmake_project_root_ref() {
+        assert_eq!(
+            cmake_project_root_ref("build"),
+            "${CMAKE_CURRENT_LIST_DIR}/.."
+        );
+        assert_eq!(
+            cmake_project_root_ref("build/debug"),
+            "${CMAKE_CURRENT_LIST_DIR}/../.."
+        );
     }
 
     #[test]

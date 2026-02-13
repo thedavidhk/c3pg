@@ -1,4 +1,4 @@
-use c3pg::{command_runner, cli, commands};
+use c3pg::{cmake, cli, command_runner, commands};
 
 use anyhow::Result;
 use clap::Parser;
@@ -7,6 +7,14 @@ use log::warn;
 
 use crate::cli::{Cli, Commands};
 use crate::commands::{cmd_new, cmd_add, cmd_remove, cmd_build, cmd_run, cmd_test, cmd_clean};
+
+fn build_type(release: bool) -> cmake::BuildType {
+    if release {
+        cmake::BuildType::Release
+    } else {
+        cmake::BuildType::Debug
+    }
+}
 
 fn run() -> Result<()> {
     let cli = Cli::parse();
@@ -26,8 +34,8 @@ fn run() -> Result<()> {
         } => cmd_new(&runner, &sandbox_name, no_git, standard.unwrap_or_default())?,
         Commands::Add { dependency } => cmd_add(&runner, &dependency)?,
         Commands::Remove { dependency } => cmd_remove(&runner, &dependency)?,
-        Commands::Build { build_type } => cmd_build(&runner, build_type.unwrap_or_default(), lvl)?,
-        Commands::Run { build_type } => cmd_run(&runner, build_type.unwrap_or_default(), lvl)?,
+        Commands::Build { release } => cmd_build(&runner, build_type(release), lvl)?,
+        Commands::Run { release } => cmd_run(&runner, build_type(release), lvl)?,
         Commands::Test(testargs) => cmd_test(&runner, testargs, lvl)?,
         Commands::Clean => cmd_clean(&runner)?,
     }

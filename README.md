@@ -12,9 +12,10 @@ code. The complexity still exists, but it stays under the hood.
 ## Features
 
 - **Quick Project Setup**: Initialize a new C++ project sandbox with a single command.
-- **Unified Configuration**: Use c3pg.toml for all project configuration, similar to Cargo.toml in Rust.
-- **Dependency Management**: Easily add Conan dependencies to your project.
+- **Unified Configuration**: Use `c3pg.toml` for all project configuration, similar to `Cargo.toml` in Rust.
+- **Dependency Management**: Easily add and remove Conan dependencies.
 - **Build and Run**: Compile and execute your sandbox projects with minimal effort.
+- **Testing**: Scaffold and run GTest-based tests with auto-detection.
 - **Customizable C++ Standards**: Specify the C++ standard for your projects (e.g., C++20, C++17).
 - **Git Integration**: Optionally initialize a Git repository for version control.
 
@@ -24,12 +25,13 @@ code. The complexity still exists, but it stays under the hood.
 
 `c3pg` requires the following tools to be installed on your system:
 
-- [CMake](https://cmake.org/)
+- [CMake](https://cmake.org/) (3.21+)
 - [Conan (2.x)](https://conan.io/)
+- A C++ compiler (GCC, Clang, or MSVC)
 
 Install these tools via your package manager or their respective websites.
 
-To build and run `c3pg`, use the Rust tool chain:
+To build and install `c3pg`, use the Rust toolchain:
 
 ```bash
 cargo install --path .
@@ -82,15 +84,27 @@ Example:
 c3pg add fmt
 ```
 
-`c3pg` looks for the latest version in the default Conan remote by default. Optionally, we can
+`c3pg` looks for the latest version in the default Conan remote by default. Optionally, you can
 specify a version and/or a user/channel:
 
-````bash
+```bash
 c3pg add fmt/10.0.1
 c3pg add fmt/10.0.1@some_user/some_channel
+```
+
+#### `remove`
+
+Remove a dependency from the current project.
+
 ```bash
-`
-````
+c3pg remove <dependency>
+```
+
+Example:
+
+```bash
+c3pg remove fmt
+```
 
 #### `build`
 
@@ -102,13 +116,12 @@ c3pg build [OPTIONS]
 
 Options:
 
-- `--build-type, -b`: Set the build type (`Debug`, `Release`, `RelWithDebugInfo`) (default:
-  `Debug`).
+- `--release, -r`: Build in release mode (default: debug).
 
 Example:
 
 ```bash
-c3pg build -b Release
+c3pg build --release
 ```
 
 #### `run`
@@ -121,13 +134,54 @@ c3pg run [OPTIONS]
 
 Options:
 
-- `--build-type, -b`: Set the build type (`Debug`, `Release`, `RelWithDebugInfo`) (default:
-  `Debug`).
+- `--release, -r`: Build in release mode (default: debug).
 
 Example:
 
 ```bash
 c3pg run
+c3pg run --release
+```
+
+#### `test`
+
+Manage and run the project's test suite. GTest is added automatically the first time a test is
+created.
+
+```bash
+c3pg test [OPTIONS]
+c3pg test add <name>
+```
+
+Subcommands:
+
+- `add <name>`: Scaffold a new GTest source file (`tests/test_<name>.cpp`). On first use, this
+  also adds `gtest` as a dependency.
+
+Options (when running tests):
+
+- `--filter, -f`: Expression to match test cases to run.
+- `--jobs, -j`: Number of parallel test jobs.
+
+Examples:
+
+```bash
+# Create a test (lazily adds gtest on first use)
+c3pg test add math
+
+# Run all tests
+c3pg test
+
+# Run only tests matching "math" with 4 jobs
+c3pg test --filter math --jobs 4
+```
+
+#### `clean`
+
+Remove all build artifacts.
+
+```bash
+c3pg clean
 ```
 
 ---
@@ -138,13 +192,24 @@ c3pg run
 
 When you create a new sandbox, `c3pg` generates the following files:
 
-- `c3pg.toml`: A unified configuration file for the project. This file includes all project
-  settings, such as dependencies, the C++ standard, and Conan/CMake configurations.
-- `main.cpp`: A simple "Hello World" program.
-- `build/` directory: Contains all generated build files, including:
-  - `CMakeLists.txt`: A minimal CMake configuration.
-  - `conanfile.py`: A template Conan file for dependency management.
-- `.gitignore`: A Git ignore file (if Git is initialized).
+```
+my_project/
+  c3pg.toml          # Unified project configuration
+  src/
+    main.cpp         # "Hello World" starter
+  build/
+    CMakeLists.txt   # Generated CMake configuration
+    conanfile.py     # Generated Conan recipe
+  .gitignore         # (if Git is initialized)
+```
+
+Tests are added on demand via `c3pg test add`:
+
+```
+my_project/
+  tests/
+    test_math.cpp    # Scaffolded GTest file
+```
 
 ### Example Workflow
 
@@ -160,7 +225,7 @@ c3pg new my_project
 c3pg add fmt
 ```
 
-3. Edit the generated `main.cpp` file, e.g.:
+3. Edit `src/main.cpp`:
 
 ```c++
 #include <fmt/core.h>
@@ -170,10 +235,18 @@ int main() {
 }
 ```
 
-3. Build and run the project:
+4. Build and run:
 
 ```bash
 c3pg run
+```
+
+5. Add and run tests:
+
+```bash
+c3pg test add math
+# edit tests/test_math.cpp ...
+c3pg test
 ```
 
 ---
@@ -187,29 +260,42 @@ The `c3pg.toml` file is the central configuration file for your project. Here's 
 ```toml
 [project]
 name = "my_project"
-dependencies = ["fmt/10.1.0"]
+dependencies = ["fmt/10.1.0", "gtest/1.15.0"]
 
 [cmake]
-standard = "20"
+standard = "Cpp20"
 export_compile_commands = true
 
 [conan]
 bin = "conan"
-remote = "default"
+
+[testing]
+dir = "tests"
 ```
 
 ### Sections
 
-- **`[project]`**: Project-level settings, such as the project name and dependencies.
-- **`[cmake]`**: CMake-specific settings, such as the C++ standard.
-- **`[conan]`**: Conan-specific settings, such as the Conan binary path and the default remote.
+- **`[project]`**: Project-level settings -- name, dependencies, and build cache directory.
+- **`[cmake]`**: CMake-specific settings -- C++ standard and compile-commands export.
+- **`[conan]`**: Conan-specific settings -- binary path and optional remote override.
+- **`[testing]`**: Testing settings -- test source directory (default: `tests`).
 
 ---
 
-## Future Plans
+## Development
 
-While `c3pg` already simplifies sandbox creation and management, future iterations might include:
+### Running tests
 
-- Built-in templates for common project setups.
-- Improved integration with package managers and remote repositories.
-- Additional customization options for `c3pg.toml`.
+```bash
+# Unit + integration tests (no external tools needed)
+cargo test
+
+# End-to-end tests (requires cmake, conan, and a C++ compiler)
+C3PG_E2E=1 cargo test --test e2e
+```
+
+### Linting
+
+```bash
+cargo clippy --all-targets
+```

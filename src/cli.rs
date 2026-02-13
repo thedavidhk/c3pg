@@ -2,7 +2,7 @@ use clap::{ArgAction, Parser, Subcommand};
 use clap_derive::Args;
 use clap_verbosity_flag::{InfoLevel, Verbosity};
 
-use crate::cmake::{BuildType, CppStandard};
+use crate::cmake::CppStandard;
 
 /// c3pg: Create, manage, and run C++ project sandboxes
 #[derive(Parser, Debug)]
@@ -72,15 +72,15 @@ pub enum Commands {
     },
     /// Build the current sandbox project (in the current working directory)
     Build {
-        /// Build type (default: Debug)
+        /// Build in release mode (default: debug)
         #[arg(long, short)]
-        build_type: Option<BuildType>,
+        release: bool,
     },
     /// Run the current sandbox project (build if necessary)
     Run {
-        /// Build type (default: Debug)
+        /// Build in release mode (default: debug)
         #[arg(long, short)]
-        build_type: Option<BuildType>,
+        release: bool,
     },
     /// Testing
     Test(TestArgs),
