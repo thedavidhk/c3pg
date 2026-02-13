@@ -2,8 +2,9 @@ use std::path::Path;
 
 use crate::{
     cmake_core::{
-        DiscoverMode, LibType, Project, Scope::PRIVATE, Target, TestEntry, TestFramework,
-        TestSuite, Value,
+        DiscoverMode, LibType, Project,
+        Scope::{PRIVATE, PUBLIC},
+        Target, TestEntry, TestFramework, TestSuite, Value,
     },
     config::Config,
 };
@@ -51,9 +52,14 @@ pub fn generate_cmakelists(config: &Config) -> Result<String> {
         .include("${CMAKE_BINARY_DIR}/conandeps_legacy.cmake");
 
     if has_lib {
+        // Link Conan deps with PUBLIC so that the executable (which links
+        // against the library) also inherits the include directories.
+        // Expose src/ as a PUBLIC include directory so test targets and the
+        // executable can #include project headers.
         let lib = Target::library(&lib_name, LibType::Static)
             .srcs(lib_sources)
-            .link(PRIVATE, Value::Raw("${CONANDEPS_LEGACY}".into()));
+            .include(PUBLIC, project_root_value(&project_root_ref, "src"))
+            .link(PUBLIC, Value::Raw("${CONANDEPS_LEGACY}".into()));
         let app = Target::executable(project_name)
             .src(project_root_value(&project_root_ref, "src/main.cpp"))
             .link(PRIVATE, &lib_name);
