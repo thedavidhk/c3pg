@@ -1,5 +1,6 @@
-use anyhow::Context;
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::collections::{HashMap, HashSet};
 use std::{fmt, str::FromStr};
 
 use crate::{
@@ -11,9 +12,121 @@ use crate::{
 #[derive(Debug, Default, FromFile, ToFile, Serialize, Deserialize)]
 pub struct Config {
     pub project: Project,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub targets: Vec<TargetConfig>,
     pub cmake: CMakeConfig,
     pub conan: ConanConfig,
     pub testing: TestingConfig,
+}
+
+// ---------------------------------------------------------------------------
+// Target types
+// ---------------------------------------------------------------------------
+
+/// The kind of build artifact a target produces.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TargetType {
+    Executable,
+    StaticLibrary,
+}
+
+/// A target as declared in `[[targets]]` in `c3pg.toml`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct TargetConfig {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub target_type: TargetType,
+    #[serde(default)]
+    pub sources: Vec<String>,
+    #[serde(default)]
+    pub public_include: Vec<String>,
+    #[serde(default)]
+    pub link: Vec<String>,
+}
+
+/// A resolved target ready for `CMake` generation. Source entries have been
+/// expanded to concrete file paths.
+#[derive(Debug, Clone)]
+pub struct EffectiveTarget {
+    pub name: String,
+    pub target_type: TargetType,
+    pub source_files: Vec<String>,
+    pub public_include: Vec<String>,
+    pub link: Vec<String>,
+}
+
+/// Validate the `[[targets]]` array from a config file.
+///
+/// Checks for duplicate names, dangling `link` references, and dependency
+/// cycles.
+///
+/// # Errors
+///
+/// Returns an error describing the first validation problem found.
+pub fn validate_targets(targets: &[TargetConfig]) -> Result<()> {
+    if targets.is_empty() {
+        return Ok(());
+    }
+
+    // Duplicate names
+    let mut seen = HashSet::new();
+    for t in targets {
+        if !seen.insert(&t.name) {
+            bail!("duplicate target name: '{}'", t.name);
+        }
+    }
+
+    // Dangling link references
+    let names: HashSet<&str> = targets.iter().map(|t| t.name.as_str()).collect();
+    for t in targets {
+        for link in &t.link {
+            if !names.contains(link.as_str()) {
+                bail!(
+                    "target '{}' links to '{}', which is not a declared target",
+                    t.name,
+                    link
+                );
+            }
+        }
+    }
+
+    // Cycle detection via DFS
+    let adj: HashMap<&str, &[String]> = targets
+        .iter()
+        .map(|t| (t.name.as_str(), t.link.as_slice()))
+        .collect();
+
+    // 0 = unvisited, 1 = in-stack, 2 = done
+    let mut state: HashMap<&str, u8> = names.iter().map(|&n| (n, 0u8)).collect();
+
+    for &start in &names {
+        if state[start] == 0 {
+            let mut stack = vec![(start, 0usize)]; // (node, edge index)
+            state.insert(start, 1);
+            while let Some((node, idx)) = stack.last_mut() {
+                let edges = adj[*node];
+                if *idx < edges.len() {
+                    let next = edges[*idx].as_str();
+                    *idx += 1;
+                    match state[next] {
+                        1 => bail!("dependency cycle detected involving target '{next}'"),
+                        0 => {
+                            state.insert(next, 1);
+                            stack.push((next, 0));
+                        }
+                        _ => {} // already visited
+                    }
+                } else {
+                    state.insert(node, 2);
+                    stack.pop();
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 impl fmt::Display for Config {
@@ -216,5 +329,186 @@ dir = "tests"
         });
         assert_eq!(project.dependencies.len(), 2); // Should not increase
         assert_eq!(project.dependencies[0].name, "DependencyA"); // Should be replaced
+    }
+
+    // -----------------------------------------------------------------------
+    // Target config deserialization
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_config_without_targets_is_valid() -> Result<()> {
+        let toml_data = r#"
+[project]
+name = "simple"
+dependencies = []
+
+[cmake]
+[conan]
+[testing]
+"#;
+        let config: Config = toml::from_str(toml_data)?;
+        assert_eq!(config.project.name, "simple");
+        Ok(())
+    }
+
+    #[test]
+    fn test_config_with_targets_deserializes() -> Result<()> {
+        let toml_data = r#"
+[project]
+name = "multi"
+dependencies = ["fmt/11.0.0"]
+
+[[targets]]
+name = "mylib"
+type = "static-library"
+sources = ["src/lib"]
+public-include = ["include"]
+
+[[targets]]
+name = "myapp"
+type = "executable"
+sources = ["src/main.cpp"]
+link = ["mylib"]
+
+[cmake]
+[conan]
+[testing]
+"#;
+        let config: Config = toml::from_str(toml_data)?;
+        assert_eq!(config.targets.len(), 2);
+        assert_eq!(config.targets[0].name, "mylib");
+        assert_eq!(config.targets[0].target_type, TargetType::StaticLibrary);
+        assert_eq!(config.targets[0].sources, vec!["src/lib"]);
+        assert_eq!(config.targets[0].public_include, vec!["include"]);
+        assert!(config.targets[0].link.is_empty());
+
+        assert_eq!(config.targets[1].name, "myapp");
+        assert_eq!(config.targets[1].target_type, TargetType::Executable);
+        assert_eq!(config.targets[1].sources, vec!["src/main.cpp"]);
+        assert!(config.targets[1].public_include.is_empty());
+        assert_eq!(config.targets[1].link, vec!["mylib"]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_config_with_targets_does_not_serialize_empty() {
+        let config = Config::default();
+        let serialized = toml::to_string_pretty(&config).unwrap();
+        assert!(
+            !serialized.contains("targets"),
+            "Empty targets should not appear in serialized output"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Target validation
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_validate_empty_targets_ok() {
+        assert!(validate_targets(&[]).is_ok());
+    }
+
+    #[test]
+    fn test_validate_valid_targets() {
+        let targets = vec![
+            TargetConfig {
+                name: "mylib".into(),
+                target_type: TargetType::StaticLibrary,
+                sources: vec!["src/lib".into()],
+                public_include: vec!["include".into()],
+                link: vec![],
+            },
+            TargetConfig {
+                name: "myapp".into(),
+                target_type: TargetType::Executable,
+                sources: vec!["src/main.cpp".into()],
+                public_include: vec![],
+                link: vec!["mylib".into()],
+            },
+        ];
+        assert!(validate_targets(&targets).is_ok());
+    }
+
+    #[test]
+    fn test_validate_duplicate_names() {
+        let targets = vec![
+            TargetConfig {
+                name: "dup".into(),
+                target_type: TargetType::Executable,
+                sources: vec![],
+                public_include: vec![],
+                link: vec![],
+            },
+            TargetConfig {
+                name: "dup".into(),
+                target_type: TargetType::StaticLibrary,
+                sources: vec![],
+                public_include: vec![],
+                link: vec![],
+            },
+        ];
+        let err = validate_targets(&targets).unwrap_err();
+        assert!(
+            format!("{err}").contains("duplicate"),
+            "Expected duplicate error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_dangling_link() {
+        let targets = vec![TargetConfig {
+            name: "app".into(),
+            target_type: TargetType::Executable,
+            sources: vec![],
+            public_include: vec![],
+            link: vec!["nonexistent".into()],
+        }];
+        let err = validate_targets(&targets).unwrap_err();
+        assert!(
+            format!("{err}").contains("nonexistent"),
+            "Expected dangling link error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_cycle() {
+        let targets = vec![
+            TargetConfig {
+                name: "a".into(),
+                target_type: TargetType::StaticLibrary,
+                sources: vec![],
+                public_include: vec![],
+                link: vec!["b".into()],
+            },
+            TargetConfig {
+                name: "b".into(),
+                target_type: TargetType::StaticLibrary,
+                sources: vec![],
+                public_include: vec![],
+                link: vec!["a".into()],
+            },
+        ];
+        let err = validate_targets(&targets).unwrap_err();
+        assert!(
+            format!("{err}").contains("cycle"),
+            "Expected cycle error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_self_link_is_cycle() {
+        let targets = vec![TargetConfig {
+            name: "self".into(),
+            target_type: TargetType::StaticLibrary,
+            sources: vec![],
+            public_include: vec![],
+            link: vec!["self".into()],
+        }];
+        let err = validate_targets(&targets).unwrap_err();
+        assert!(
+            format!("{err}").contains("cycle"),
+            "Expected cycle error, got: {err}"
+        );
     }
 }

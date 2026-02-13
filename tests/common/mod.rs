@@ -1,4 +1,4 @@
-use c3pg::config::Config;
+use c3pg::config::{Config, TargetConfig, TargetType};
 use c3pg::test_utils::MockCommandRunner;
 use c3pg::traits::{FromFile, ToFile};
 use std::fs;
@@ -52,9 +52,16 @@ int main() {
     )
     .unwrap();
 
-    // Build a config
+    // Build a config with a default executable target
     let mut config = Config::default();
     config.project.name = name.to_string();
+    config.targets = vec![TargetConfig {
+        name: name.to_string(),
+        target_type: TargetType::Executable,
+        sources: vec!["src/main.cpp".to_string()],
+        public_include: vec![],
+        link: vec![],
+    }];
 
     // Write config
     config.to_file(root.join("c3pg.toml")).unwrap();
@@ -69,6 +76,69 @@ int main() {
 /// Read a config back from the project directory.
 pub fn read_config(project_root: &Path) -> Config {
     Config::from_file(project_root.join("c3pg.toml")).expect("failed to read c3pg.toml")
+}
+
+/// Set up a temporary directory that looks like a multi-target c3pg project.
+/// Returns the `TempDir` handle and the config.
+///
+/// Layout:
+/// - `src/lib/math.cpp`
+/// - `src/main.cpp`
+/// - `src/tool/tool.cpp`
+/// - `include/` (empty, for public headers)
+/// - `build/CMakeLists.txt`
+/// - `build/conanfile.py`
+/// - `c3pg.toml` with `[[targets]]`
+pub fn setup_multitarget_project(name: &str) -> (TempDir, Config) {
+    use c3pg::config::{TargetConfig, TargetType};
+
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let root = tmp.path();
+
+    // Create directory structure
+    fs::create_dir_all(root.join("src/lib")).unwrap();
+    fs::create_dir_all(root.join("src/tool")).unwrap();
+    fs::create_dir_all(root.join("include")).unwrap();
+    fs::create_dir_all(root.join("build")).unwrap();
+
+    // Write source files
+    fs::write(root.join("src/lib/math.cpp"), "int add(int a, int b) { return a + b; }\n").unwrap();
+    fs::write(root.join("src/main.cpp"), "int main() { return 0; }\n").unwrap();
+    fs::write(root.join("src/tool/tool.cpp"), "int main() { return 0; }\n").unwrap();
+
+    let mut config = Config::default();
+    config.project.name = name.to_string();
+    config.targets = vec![
+        TargetConfig {
+            name: "mylib".into(),
+            target_type: TargetType::StaticLibrary,
+            sources: vec!["src/lib".into()],
+            public_include: vec!["include".into()],
+            link: vec![],
+        },
+        TargetConfig {
+            name: "myapp".into(),
+            target_type: TargetType::Executable,
+            sources: vec!["src/main.cpp".into()],
+            public_include: vec![],
+            link: vec!["mylib".into()],
+        },
+        TargetConfig {
+            name: "mytool".into(),
+            target_type: TargetType::Executable,
+            sources: vec!["src/tool".into()],
+            public_include: vec![],
+            link: vec!["mylib".into()],
+        },
+    ];
+
+    config.to_file(root.join("c3pg.toml")).unwrap();
+
+    // Write placeholder generated files
+    fs::write(root.join("build/CMakeLists.txt"), "# placeholder\n").unwrap();
+    fs::write(root.join("build/conanfile.py"), "# placeholder\n").unwrap();
+
+    (tmp, config)
 }
 
 /// Assert a file exists at the given path.

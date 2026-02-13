@@ -46,8 +46,8 @@ fn run() -> Result<()> {
         Commands::Build { release, sanitizers } => {
             cmd_build(&runner, build_type(release), lvl, &sanitizers)?;
         }
-        Commands::Run { release, sanitizers } => {
-            cmd_run(&runner, build_type(release), lvl, &sanitizers)?;
+        Commands::Run { release, target, sanitizers } => {
+            cmd_run(&runner, build_type(release), lvl, &sanitizers, target.as_deref())?;
         }
         Commands::Fmt { check } => {
             let config = load_config(&runner)?;
