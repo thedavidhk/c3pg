@@ -5,7 +5,7 @@ use clap::Parser;
 use command_runner::SystemCommandRunner;
 
 use crate::cli::{Cli, Commands};
-use crate::commands::{cmd_new, cmd_add, cmd_remove, cmd_build, cmd_run, cmd_test, cmd_clean};
+use crate::commands::{cmd_new, cmd_init, cmd_add, cmd_remove, cmd_build, cmd_run, cmd_test, cmd_clean};
 
 fn build_type(release: bool) -> cmake::BuildType {
     if release {
@@ -37,6 +37,10 @@ fn run() -> Result<()> {
             no_git,
             standard,
         } => cmd_new(&runner, &sandbox_name, no_git, standard.unwrap_or_default())?,
+        Commands::Init {
+            no_git,
+            standard,
+        } => cmd_init(&runner, no_git, standard.unwrap_or_default())?,
         Commands::Add { dependency } => cmd_add(&runner, &dependency)?,
         Commands::Remove { dependency } => cmd_remove(&runner, &dependency)?,
         Commands::Build { release, sanitizers } => {

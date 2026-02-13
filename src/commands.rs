@@ -24,6 +24,60 @@ use crate::{
     ui,
 };
 
+const MAIN_CPP_TEMPLATE: &str = r#"#include <iostream>
+
+int main() {
+    std::cout << "Hello from C3PG!" << std::endl;
+    return 0;
+}
+"#;
+
+/// Shared scaffolding: create dirs, write config and build files, optionally
+/// write a starter `main.cpp`, and optionally `git init`.
+/// Shared scaffolding: create dirs, write config and build files, optionally
+/// write a starter `main.cpp`, and optionally `git init`.
+///
+/// `git_dir` is the path passed to `git init` (e.g. the sandbox name for
+/// `new`, or `"."` for `init`).
+fn scaffold_project(
+    runner: &impl CommandRunner,
+    project_path: &Path,
+    name: &str,
+    git_dir: Option<&str>,
+    standard: CppStandard,
+    write_main: bool,
+) -> Result<()> {
+    let src_dir = project_path.join("src");
+    fs::create_dir_all(&src_dir).context("Could not create src dir")?;
+    let mut config = Config::default();
+    let cache_dir = project_path.join(&config.project.cache_dir);
+    fs::create_dir_all(&cache_dir).context("Could not create build dir")?;
+
+    if write_main {
+        fs::write(src_dir.join("main.cpp"), MAIN_CPP_TEMPLATE)
+            .context("Could not write to main.cpp")?;
+    }
+
+    config.project.name = name.to_string();
+    config.cmake.standard = standard;
+    write_build_files(runner, &config, &cache_dir)?;
+    config.to_file(project_path.join("c3pg.toml"))?;
+
+    if let Some(dir) = git_dir {
+        let gitignore_content = config.project.cache_dir.clone();
+        fs::write(project_path.join(".gitignore"), gitignore_content)
+            .context("Could not create gitignore")?;
+
+        runner
+            .command("git")
+            .args(["init", "-b", "main", dir])
+            .run()?
+            .expect_success("Could not initialize git repository")?;
+    }
+
+    Ok(())
+}
+
 /// Create a new sandbox directory with a minimal setup (`CMakeLists.txt`,
 /// `conanfile.py`, `main.cpp`).
 ///
@@ -37,45 +91,47 @@ pub fn cmd_new(
     git: bool,
     standard: CppStandard,
 ) -> Result<()> {
-    // 1. Create the sandbox directory
     let project_path = PathBuf::from(sandbox_name);
-    let src_dir = project_path.join("src");
-    fs::create_dir_all(&src_dir).context("Could not create src dir")?;
-    let mut config = Config::default();
-    let cache_dir = project_path.join(&config.project.cache_dir);
-    fs::create_dir_all(&cache_dir).context("Could not create build dir")?;
-
-    // 2. Write main.cpp
-    let main_cpp_content = r#"#include <iostream>
-
-int main() {
-    std::cout << "Hello from C3PG!" << std::endl;
-    return 0;
+    let git_dir = if git { Some(sandbox_name) } else { None };
+    scaffold_project(&runner, &project_path, sandbox_name, git_dir, standard, true)?;
+    ui::status("Created", sandbox_name);
+    Ok(())
 }
-"#;
-    fs::write(src_dir.join("main.cpp"), main_cpp_content).context("Could not write to main.cpp")?;
 
-    // 3. Write minimal config files (no gtest -- added lazily via `c3pg test add`)
-    config.project.name = sandbox_name.to_string();
-    config.cmake.standard = standard;
-    write_build_files(&runner, &config, &cache_dir)?;
-    config.to_file(project_path.join("c3pg.toml"))?;
+/// Initialize a c3pg project in the current directory.
+///
+/// If `src/` is empty, writes a starter `main.cpp`. If sources already exist,
+/// leaves them untouched.
+///
+/// # Errors
+///
+/// Returns an error if `c3pg.toml` already exists, directory creation fails,
+/// or `git init` fails when `git` is `true`.
+pub fn cmd_init(
+    runner: impl CommandRunner,
+    git: bool,
+    standard: CppStandard,
+) -> Result<()> {
+    let project_path = std::env::current_dir().context("could not determine working directory")?;
 
-    if git {
-        // Write a .gitignore
-        let gitignore_content = config.project.cache_dir.clone();
-        fs::write(project_path.join(".gitignore"), gitignore_content)
-            .context("Could not create gitignore")?;
-
-        // Initialize empty git repo
-        runner
-            .command("git")
-            .args(["init", "-b", "main", sandbox_name])
-            .run()?
-            .expect_success("Could not initialize git repository")?;
+    if project_path.join("c3pg.toml").exists() {
+        bail!("c3pg.toml already exists -- project is already initialized");
     }
 
-    ui::status("Created", sandbox_name);
+    let name = project_path
+        .file_name()
+        .map_or_else(|| "sandbox".to_string(), |n| n.to_string_lossy().into_owned());
+
+    // Only write main.cpp if src/ doesn't already have source files
+    let src_dir = project_path.join("src");
+    let has_sources = src_dir.is_dir()
+        && fs::read_dir(&src_dir)
+            .map(|rd| rd.count() > 0)
+            .unwrap_or(false);
+
+    let git_dir = if git { Some(".") } else { None };
+    scaffold_project(&runner, &project_path, &name, git_dir, standard, !has_sources)?;
+    ui::status("Initialized", &name);
     Ok(())
 }
 
