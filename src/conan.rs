@@ -3,13 +3,22 @@ use heck::ToPascalCase;
 use log::LevelFilter;
 use semver::Version;
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use crate::command_runner::{tool_stream_mode, CommandRunner};
 use crate::config::Config;
 use crate::dependency::Dependency;
 use crate::traits::ToFile;
+
+/// Filename for the dependency lockfile in the project root.
+pub const LOCKFILE_NAME: &str = "c3pg.lock";
+
+/// Remove the lockfile if it exists (e.g. after adding or removing a
+/// dependency, which invalidates the previously locked versions).
+pub fn remove_lockfile() {
+    let _ = std::fs::remove_file(LOCKFILE_NAME);
+}
 
 #[derive(Debug, ToFile)]
 pub struct Conan {
@@ -64,8 +73,15 @@ impl Conan {
             format!("build_type={}", build_type),
             "--output-folder".into(),
             out_dir.into(),
-            dir.into(),
         ];
+
+        // When a lockfile exists, pin dependency versions to it.
+        let lockfile = PathBuf::from(LOCKFILE_NAME);
+        if lockfile.exists() {
+            args.push(format!("--lockfile={LOCKFILE_NAME}"));
+        }
+
+        args.push(dir.into());
 
         args.extend(conan_verbosity_args(lvl).iter().map(std::string::ToString::to_string));
 
@@ -75,6 +91,31 @@ impl Conan {
             .stream_mode(tool_stream_mode(lvl))
             .run()?
             .expect_success("Conan install failed")?;
+
+        Ok(())
+    }
+
+    /// Run `conan lock create` to capture the resolved dependency versions
+    /// into a lockfile (`c3pg.lock`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `conan lock create` command fails.
+    pub fn lock_create(
+        &self,
+        runner: &impl CommandRunner,
+        conanfile: &str,
+        lvl: LevelFilter,
+    ) -> Result<()> {
+        let lockfile_arg = format!("--lockfile-out={LOCKFILE_NAME}");
+        let args = vec!["lock", "create", conanfile, &lockfile_arg];
+
+        runner
+            .command(&self.bin)
+            .args(args)
+            .stream_mode(tool_stream_mode(lvl))
+            .run()?
+            .expect_success("conan lock create failed")?;
 
         Ok(())
     }
