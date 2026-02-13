@@ -1,11 +1,11 @@
-use c3pg::{cmake, cli, command_runner, commands, ui};
+use c3pg::{cmake, cli, command_runner, commands, format, ui};
 
 use anyhow::Result;
 use clap::Parser;
 use command_runner::SystemCommandRunner;
 
 use crate::cli::{Cli, Commands};
-use crate::commands::{cmd_new, cmd_init, cmd_add, cmd_remove, cmd_build, cmd_run, cmd_test, cmd_clean};
+use crate::commands::{cmd_new, cmd_init, cmd_add, cmd_remove, cmd_build, cmd_run, cmd_test, cmd_clean, load_config};
 
 fn build_type(release: bool) -> cmake::BuildType {
     if release {
@@ -48,6 +48,20 @@ fn run() -> Result<()> {
         }
         Commands::Run { release, sanitizers } => {
             cmd_run(&runner, build_type(release), lvl, &sanitizers)?;
+        }
+        Commands::Fmt { check } => {
+            let config = load_config(&runner)?;
+            format::cmd_fmt(&runner, lvl, &config.testing.dir, check)?;
+        }
+        Commands::Lint { fix } => {
+            let config = load_config(&runner)?;
+            format::cmd_lint(
+                &runner,
+                lvl,
+                &config.testing.dir,
+                &config.project.cache_dir,
+                fix,
+            )?;
         }
         Commands::Test(testargs) => cmd_test(&runner, testargs, lvl)?,
         Commands::Clean => cmd_clean(&runner)?,

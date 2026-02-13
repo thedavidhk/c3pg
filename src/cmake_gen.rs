@@ -127,7 +127,10 @@ int main(int argc, char** argv) {
 }
 ";
 
-const SOURCE_EXTENSIONS: [&str; 4] = ["c", "cpp", "cxx", "cc"];
+pub const SOURCE_EXTENSIONS: [&str; 4] = ["c", "cpp", "cxx", "cc"];
+
+/// Header file extensions recognised by `c3pg fmt` and `c3pg lint`.
+pub const HEADER_EXTENSIONS: [&str; 4] = ["h", "hpp", "hxx", "hh"];
 
 /// Compute the `${CMAKE_CURRENT_LIST_DIR}/..` prefix that navigates from
 /// `cache_dir` back to the project root.  For `cache_dir = "build"` this
@@ -150,7 +153,7 @@ fn project_root_value(project_root_ref: &str, path: &str) -> Value {
 /// Walk a directory tree and return paths (relative to CWD) of files whose
 /// extension matches one of `exts`. Returns an empty vec if the directory
 /// does not exist or is unreadable.
-fn find_files(root: &str, exts: &[&str]) -> Vec<String> {
+pub fn find_files(root: &str, exts: &[&str]) -> Vec<String> {
     WalkDir::new(root)
         .into_iter()
         .filter_map(std::result::Result::ok)

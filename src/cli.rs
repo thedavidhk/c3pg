@@ -99,6 +99,18 @@ pub enum Commands {
         #[command(flatten)]
         sanitizers: Sanitizers,
     },
+    /// Format C/C++ source files with clang-format
+    Fmt {
+        /// Check formatting without modifying files (exit with error if unformatted)
+        #[arg(long)]
+        check: bool,
+    },
+    /// Lint C/C++ source files with clang-tidy
+    Lint {
+        /// Apply suggested fixes in-place
+        #[arg(long)]
+        fix: bool,
+    },
     /// Testing
     Test(TestArgs),
     /// Remove artifacts that c3pg has generated in the past

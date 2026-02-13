@@ -576,3 +576,85 @@ fn test_clean_succeeds_when_no_cache_dir() {
     // Should succeed without error
     assert!(result.is_ok(), "cmd_clean should succeed even when cache dir doesn't exist");
 }
+
+// ---------------------------------------------------------------------------
+// cmd_fmt / cmd_lint tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_fmt_invokes_clang_format() {
+    let (tmp, _) = setup_project_dir("fmttest");
+    let runner = mock_with_conan_responses();
+
+    with_cwd(tmp.path(), || {
+        c3pg::format::cmd_fmt(&runner, LevelFilter::Info, "tests", false).unwrap();
+    });
+
+    runner.assert_ran("clang-format", &["-i"]);
+    // Should include the main.cpp file
+    let cmds = runner.executed_commands();
+    let fmt_cmd = cmds.iter().find(|(c, _)| c == "clang-format").unwrap();
+    assert!(
+        fmt_cmd.1.iter().any(|a| a.contains("main.cpp")),
+        "clang-format should receive main.cpp, got: {:?}",
+        fmt_cmd.1
+    );
+}
+
+#[test]
+fn test_fmt_check_mode() {
+    let (tmp, _) = setup_project_dir("fmtcheck");
+    let runner = mock_with_conan_responses();
+
+    with_cwd(tmp.path(), || {
+        c3pg::format::cmd_fmt(&runner, LevelFilter::Info, "tests", true).unwrap();
+    });
+
+    runner.assert_ran("clang-format", &["--dry-run", "--Werror"]);
+}
+
+#[test]
+fn test_lint_requires_compile_commands() {
+    let (tmp, _) = setup_project_dir("lintnocc");
+    let runner = mock_with_conan_responses();
+
+    let result = with_cwd(tmp.path(), || {
+        c3pg::format::cmd_lint(&runner, LevelFilter::Info, "tests", "build", false)
+    });
+
+    assert!(result.is_err());
+    let err_msg = format!("{:#}", result.unwrap_err());
+    assert!(
+        err_msg.contains("compile_commands.json"),
+        "Error should mention compile_commands.json, got: {err_msg}"
+    );
+}
+
+#[test]
+fn test_lint_invokes_clang_tidy() {
+    let (tmp, _) = setup_project_dir("linttest");
+    let runner = mock_with_conan_responses();
+
+    // Create the compile_commands.json so the pre-check passes
+    fs::write(tmp.path().join("build/compile_commands.json"), "[]").unwrap();
+
+    with_cwd(tmp.path(), || {
+        c3pg::format::cmd_lint(&runner, LevelFilter::Info, "tests", "build", false).unwrap();
+    });
+
+    runner.assert_ran("clang-tidy", &["-p=build"]);
+}
+
+#[test]
+fn test_lint_fix_mode() {
+    let (tmp, _) = setup_project_dir("lintfix");
+    let runner = mock_with_conan_responses();
+
+    fs::write(tmp.path().join("build/compile_commands.json"), "[]").unwrap();
+
+    with_cwd(tmp.path(), || {
+        c3pg::format::cmd_lint(&runner, LevelFilter::Info, "tests", "build", true).unwrap();
+    });
+
+    runner.assert_ran("clang-tidy", &["-p=build", "--fix"]);
+}

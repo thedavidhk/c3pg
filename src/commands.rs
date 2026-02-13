@@ -34,8 +34,6 @@ int main() {
 
 /// Shared scaffolding: create dirs, write config and build files, optionally
 /// write a starter `main.cpp`, and optionally `git init`.
-/// Shared scaffolding: create dirs, write config and build files, optionally
-/// write a starter `main.cpp`, and optionally `git init`.
 ///
 /// `git_dir` is the path passed to `git init` (e.g. the sandbox name for
 /// `new`, or `"."` for `init`).
@@ -379,6 +377,17 @@ fn write_build_files(
     )
     .context("Could not write CMakeLists.txt")?;
     Ok(())
+}
+
+/// Load the project config from `c3pg.toml` (or legacy `cpppg.toml`),
+/// create the cache directory, and regenerate build files.
+///
+/// # Errors
+///
+/// Returns an error if neither config file can be read, the cache directory
+/// cannot be created, or the build files cannot be written.
+pub fn load_config(runner: &impl CommandRunner) -> Result<Config> {
+    build_config(runner)
 }
 
 fn build_config(runner: &impl CommandRunner) -> Result<Config> {
