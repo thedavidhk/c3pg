@@ -40,9 +40,9 @@ pub struct TargetConfig {
     pub target_type: TargetType,
     #[serde(default)]
     pub sources: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub public_include: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub link: Vec<String>,
 }
 
