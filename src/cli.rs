@@ -56,7 +56,7 @@ pub enum Commands {
         #[arg(long, action(ArgAction::SetFalse))]
         no_git: bool,
 
-        /// Set the CppStandard
+        /// Set the `CppStandard`
         #[arg(long)]
         standard: Option<CppStandard>,
     },

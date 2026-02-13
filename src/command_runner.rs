@@ -17,18 +17,16 @@ pub enum StreamMode {
 /// -q / Error:    only show errors (stderr)
 /// Info/Warn:     only show warnings/errors (stderr)
 /// -v / -vv:      show stdout + stderr (prefix at -vv)
+#[must_use] 
 pub fn tool_stream_mode(level: LevelFilter) -> StreamMode {
     match level {
-        LevelFilter::Off | LevelFilter::Error => StreamMode::Stream {
-            stream_stdout: false,
-            stream_stderr: true,
-            prefix: false,
-        },
-        LevelFilter::Warn | LevelFilter::Info => StreamMode::Stream {
-            stream_stdout: false,
-            stream_stderr: true,
-            prefix: false,
-        },
+        LevelFilter::Off | LevelFilter::Error | LevelFilter::Warn | LevelFilter::Info => {
+            StreamMode::Stream {
+                stream_stdout: false,
+                stream_stderr: true,
+                prefix: false,
+            }
+        }
         LevelFilter::Debug => StreamMode::Stream {
             stream_stdout: true,
             stream_stderr: true,
@@ -42,9 +40,10 @@ pub fn tool_stream_mode(level: LevelFilter) -> StreamMode {
     }
 }
 
-/// For the user binary (cmd_run):
+/// For the user binary (`cmd_run`):
 /// Default: show everything live.
 /// -q / Error / Warn: suppress live output (buffer; show only on failure).
+#[must_use] 
 pub fn binary_stream_mode(level: LevelFilter) -> StreamMode {
     match level {
         LevelFilter::Off | LevelFilter::Error | LevelFilter::Warn => StreamMode::Buffer,
@@ -57,6 +56,12 @@ pub fn binary_stream_mode(level: LevelFilter) -> StreamMode {
 }
 
 pub trait CommandRunner: Sized {
+    /// Run `cmd` with the given arguments, streaming mode, and environment.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the command cannot be spawned or an I/O error
+    /// occurs while communicating with the child process.
     fn execute(
         &self,
         cmd: &str,
@@ -90,6 +95,7 @@ impl<R: CommandRunner> CommandBuilder<R> {
         }
     }
 
+    #[must_use]
     pub fn args<I, S>(mut self, args: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -99,18 +105,21 @@ impl<R: CommandRunner> CommandBuilder<R> {
         self
     }
 
+    #[must_use]
     pub fn stream_mode(mut self, mode: StreamMode) -> Self {
         self.mode = mode;
         self
     }
 
     /// Set an environment variable for the spawned process.
+    #[must_use]
     pub fn env(mut self, key: impl Into<String>, val: impl Into<String>) -> Self {
         self.env.push((key.into(), val.into()));
         self
     }
 
     /// Set multiple environment variables for the spawned process.
+    #[must_use]
     pub fn envs<I, K, V>(mut self, vars: I) -> Self
     where
         I: IntoIterator<Item = (K, V)>,
@@ -122,6 +131,12 @@ impl<R: CommandRunner> CommandBuilder<R> {
         self
     }
 
+    /// Execute the built command and return the captured result.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying [`CommandRunner::execute`] call
+    /// fails (e.g. the command cannot be found or spawned).
     pub fn run(self) -> anyhow::Result<CommandResult> {
         let args: Vec<_> = self.args.iter().map(String::as_str).collect();
         let env: Vec<(&str, &str)> = self
@@ -149,8 +164,48 @@ impl CommandRunner for SystemCommandRunner {
         use std::sync::{Arc, Mutex};
         use std::thread;
 
+        fn spawn_reader<R: std::io::Read + Send + 'static>(
+            pipe: Option<R>,
+            is_stdout: bool,
+            buf: Arc<Mutex<String>>,
+            stream: bool,
+            cmd_prefix: Option<String>,
+        ) -> thread::JoinHandle<()> {
+            thread::spawn(move || {
+                if let Some(pipe) = pipe {
+                    let reader = BufReader::new(pipe);
+                    for line in reader.lines().map_while(Result::ok) {
+                        {
+                            let mut b = buf.lock().unwrap();
+                            b.push_str(&line);
+                            b.push('\n');
+                        }
+
+                        if stream {
+                            if is_stdout {
+                                if let Some(ref p) = cmd_prefix {
+                                    print!("{p}");
+                                }
+                                println!("{line}");
+                                let _ = std::io::stdout().flush();
+                            } else {
+                                if let Some(ref p) = cmd_prefix {
+                                    eprint!("{p}");
+                                }
+                                eprintln!("{line}");
+                                let _ = std::io::stderr().flush();
+                            }
+                        }
+                    }
+                }
+            })
+        }
+
         let mut command = Command::new(cmd);
-        command.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
+        command
+            .args(args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
         for (k, v) in env {
             command.env(k, v);
         }
@@ -177,46 +232,6 @@ impl CommandRunner for SystemCommandRunner {
             None
         };
 
-        // Reader helper
-        fn spawn_reader<R: std::io::Read + Send + 'static>(
-            pipe: Option<R>,
-            is_stdout: bool,
-            buf: Arc<Mutex<String>>,
-            stream: bool,
-            cmd_prefix: Option<String>,
-        ) -> thread::JoinHandle<()> {
-            thread::spawn(move || {
-                if let Some(pipe) = pipe {
-                    let reader = BufReader::new(pipe);
-                    for line in reader.lines().map_while(Result::ok) {
-                        // Buffer everything
-                        {
-                            let mut b = buf.lock().unwrap();
-                            b.push_str(&line);
-                            b.push('\n');
-                        }
-
-                        // Optionally stream live
-                        if stream {
-                            if is_stdout {
-                                if let Some(ref p) = cmd_prefix {
-                                    print!("{p}");
-                                }
-                                println!("{line}");
-                                let _ = std::io::stdout().flush();
-                            } else {
-                                if let Some(ref p) = cmd_prefix {
-                                    eprint!("{p}");
-                                }
-                                eprintln!("{line}");
-                                let _ = std::io::stderr().flush();
-                            }
-                        }
-                    }
-                }
-            })
-        }
-
         let t_out = spawn_reader(
             stdout_pipe,
             true,
@@ -233,7 +248,6 @@ impl CommandRunner for SystemCommandRunner {
         );
 
         let status = child.wait()?;
-        // Wait for readers to finish
         let _ = t_out.join();
         let _ = t_err.join();
 
@@ -269,6 +283,11 @@ pub struct CommandResult {
 
 impl CommandResult {
     /// Returns the `stdout` if the command succeeded, or an error otherwise.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error containing `cmd` and `stderr` when the command exited
+    /// with a non-zero status.
     pub fn expect_success_with_stdout(self, cmd: &str) -> anyhow::Result<String> {
         if self.success {
             Ok(self.stdout)
@@ -278,6 +297,11 @@ impl CommandResult {
     }
 
     /// Ensures the command succeeded. Otherwise, returns an error.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error prefixed with `error_msg` and including `stderr`
+    /// when the command exited with a non-zero status.
     pub fn expect_success(self, error_msg: &str) -> anyhow::Result<()> {
         if self.success {
             Ok(())
@@ -293,11 +317,12 @@ mod tests {
     use std::cell::RefCell;
 
     #[derive(Default)]
+    #[allow(clippy::struct_field_names)]
     struct MockRunner {
         // Capture what was invoked
-        last_cmd: RefCell<Option<String>>,
-        last_args: RefCell<Vec<String>>,
-        last_mode: RefCell<Option<StreamMode>>,
+        recorded_cmd: RefCell<Option<String>>,
+        recorded_args: RefCell<Vec<String>>,
+        recorded_mode: RefCell<Option<StreamMode>>,
     }
 
     impl CommandRunner for MockRunner {
@@ -309,9 +334,10 @@ mod tests {
             _env: &[(&str, &str)],
         ) -> anyhow::Result<CommandResult> {
             // Record invocation for the verbosity/mode tests
-            *self.last_cmd.borrow_mut() = Some(cmd.to_string());
-            *self.last_args.borrow_mut() = args.iter().map(|s| s.to_string()).collect();
-            *self.last_mode.borrow_mut() = Some(mode);
+            *self.recorded_cmd.borrow_mut() = Some(cmd.to_string());
+            *self.recorded_args.borrow_mut() =
+                args.iter().map(std::string::ToString::to_string).collect();
+            *self.recorded_mode.borrow_mut() = Some(mode);
 
             // Simulate real command behavior expected by the tests
             match cmd {
@@ -336,7 +362,6 @@ mod tests {
                     let stdout = if is_build {
                         "Build finished".to_string()
                     } else {
-                        // mimic common configure chatter (doesn't matter; tests only check mode)
                         "-- Configuring done\n-- Generating done\n-- Build files have been written to: /tmp/mock".to_string()
                     };
                     Ok(CommandResult {
@@ -345,7 +370,6 @@ mod tests {
                         success: true,
                     })
                 }
-                "invalid_command" => anyhow::bail!("Unknown command"),
                 _ => anyhow::bail!("Unknown command"),
             }
         }
@@ -413,6 +437,6 @@ mod tests {
         };
 
         let err = result.expect_success("Command failed").unwrap_err();
-        assert_eq!(format!("{}", err), "Command failed: Error!");
+        assert_eq!(format!("{err}"), "Command failed: Error!");
     }
 }

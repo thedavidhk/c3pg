@@ -65,7 +65,7 @@ fn e2e_new_build_run() {
         binary.display(),
         fs::read_dir(project.join("build"))
             .map(|rd| rd
-                .filter_map(|e| e.ok())
+                .filter_map(std::result::Result::ok)
                 .map(|e| e.file_name())
                 .collect::<Vec<_>>())
             .unwrap_or_default(),

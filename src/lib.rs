@@ -1,3 +1,6 @@
+#![warn(clippy::pedantic)]
+#![allow(clippy::module_name_repetitions)]
+
 pub mod cli;
 pub mod cmake;
 pub mod cmake_core;

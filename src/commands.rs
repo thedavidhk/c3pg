@@ -23,7 +23,14 @@ use crate::{
     testing::{testing_add, testing_run},
 };
 
-/// Create a new sandbox directory with a minimal setup (CMakeLists.txt, conanfile.py, main.cpp).
+/// Create a new sandbox directory with a minimal setup (`CMakeLists.txt`,
+/// `conanfile.py`, `main.cpp`).
+///
+/// # Errors
+///
+/// Returns an error if directory creation fails, config files cannot be
+/// written, the default `gtest` dependency cannot be resolved, or `git init`
+/// fails when `git` is `true`.
 pub fn cmd_new(
     runner: impl CommandRunner,
     sandbox_name: &str,
@@ -74,18 +81,29 @@ int main() {
             .expect_success("Could not initialize git repository")?;
     }
 
-    info!("Created new sandbox: {}", sandbox_name);
+    info!("Created new sandbox: {sandbox_name}");
     Ok(())
 }
 
-/// Add a Conan dependency to the current project
+/// Add a Conan dependency to the current project.
+///
+/// # Errors
+///
+/// Returns an error if the project config cannot be loaded, the dependency
+/// cannot be found in the configured Conan remotes, or config files cannot
+/// be written.
 pub fn cmd_add(runner: impl CommandRunner, expr: &str) -> Result<()> {
     let mut config = build_config(&runner)?;
     find_and_add_dependency(&runner, expr, &mut config, Path::new("."))?;
     config.to_file("c3pg.toml")
 }
 
-/// Remove a Conan dependency from the current project
+/// Remove a Conan dependency from the current project.
+///
+/// # Errors
+///
+/// Returns an error if the project config cannot be loaded, config files
+/// cannot be written, or the named dependency does not exist in the project.
 pub fn cmd_remove(runner: impl CommandRunner, expr: &str) -> Result<()> {
     let mut config = build_config(&runner)?;
     let len_before = config.project.dependencies.len();
@@ -110,12 +128,19 @@ pub fn cmd_remove(runner: impl CommandRunner, expr: &str) -> Result<()> {
         );
     }
 
-    info!("Removed dependency {}", expr);
+    info!("Removed dependency {expr}");
 
     Ok(())
 }
 
 /// Build the current sandbox project.
+///
+/// Runs `conan install` followed by `cmake configure` and `cmake --build`.
+///
+/// # Errors
+///
+/// Returns an error if the project config cannot be loaded, Conan install
+/// fails, or the cmake build fails.
 pub fn cmd_build(
     runner: impl CommandRunner,
     build_type: BuildType,
@@ -128,7 +153,7 @@ pub fn cmd_build(
         &runner,
         cache_dir,
         cache_dir,
-        build_type.clone(),
+        build_type,
         lvl,
     )?;
 
@@ -142,7 +167,13 @@ pub fn cmd_build(
 }
 
 /// Run the current sandbox project.
-/// If the binary does not exist or is out of date, rebuild first, then run.
+///
+/// If the binary does not exist or is out of date, rebuilds first, then runs.
+///
+/// # Errors
+///
+/// Returns an error if the build step fails or the compiled binary cannot
+/// be executed.
 pub fn cmd_run(runner: impl CommandRunner, build_type: BuildType, lvl: LevelFilter) -> Result<()> {
     cmd_build(&runner, build_type, lvl)?;
     let config = build_config(&runner)?;
@@ -165,22 +196,38 @@ pub fn cmd_run(runner: impl CommandRunner, build_type: BuildType, lvl: LevelFilt
     Ok(())
 }
 
+/// Run or manage the project's test suite.
+///
+/// With a subcommand (e.g. `add`), creates a new test file. Without one,
+/// builds and runs the test suite via `cmake` and `ctest`.
+///
+/// # Errors
+///
+/// Returns an error if the project config cannot be loaded, the test file
+/// cannot be created, or the test build/run fails.
 pub fn cmd_test(runner: impl CommandRunner, args: TestArgs, lvl: LevelFilter) -> Result<()> {
     let config = build_config(&runner)?;
     match args.command {
         Some(command) => match command {
             crate::cli::TestOnlySubcmds::Add { name } => {
-                testing_add(runner, lvl, &config.testing, &name)?
+                testing_add(runner, lvl, &config.testing, &name)?;
             }
         },
         None => testing_run(runner, lvl, &config, args.filter.as_deref(), args.jobs)?,
-    };
+    }
     config.to_file("c3pg.toml")?;
     Ok(())
 }
 
-/// Remove artifacts that c3pg has generated in the past
-/// Checks if c3pg.toml exists to prevent accidental use outside of sandbox project
+/// Remove artifacts that c3pg has generated in the past.
+///
+/// Checks if `c3pg.toml` exists to prevent accidental use outside of a
+/// sandbox project.
+///
+/// # Errors
+///
+/// Returns an error if the project config cannot be loaded or the cache
+/// directory cannot be removed.
 pub fn cmd_clean(runner: impl CommandRunner) -> Result<()> {
     let config = build_config(&runner)?;
 
@@ -195,6 +242,13 @@ pub fn cmd_clean(runner: impl CommandRunner) -> Result<()> {
     Ok(())
 }
 
+/// Search for a Conan dependency matching `expr`, add it to `config`, and
+/// regenerate the `conanfile.py` and `CMakeLists.txt` under `project_root`.
+///
+/// # Errors
+///
+/// Returns an error if no matching dependency is found in the configured
+/// remotes, or if the generated config files cannot be written.
 pub fn find_and_add_dependency(
     runner: impl CommandRunner,
     expr: &str,
@@ -219,7 +273,7 @@ pub fn find_and_add_dependency(
     fs::write(&cmake_path, cmake_gen::generate_cmakelists(config)?)
         .with_context(|| "Could not write CMakeLists.txt")?;
 
-    info!("Added dependency '{}'", dependency);
+    info!("Added dependency '{dependency}'");
     Ok(())
 }
 

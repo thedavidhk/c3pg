@@ -1,12 +1,12 @@
-use c3pg::*;
+use c3pg::{command_runner, cli, commands};
 
 use anyhow::Result;
 use clap::Parser;
 use command_runner::SystemCommandRunner;
 use log::warn;
 
-use crate::cli::*;
-use crate::commands::*;
+use crate::cli::{Cli, Commands};
+use crate::commands::{cmd_new, cmd_add, cmd_remove, cmd_build, cmd_run, cmd_test, cmd_clean};
 
 fn run() -> Result<()> {
     let cli = Cli::parse();
@@ -36,7 +36,7 @@ fn run() -> Result<()> {
 
 fn main() {
     match run() {
-        Ok(_) => (),
+        Ok(()) => (),
         Err(e) => {
             warn!("{e}");
             std::process::exit(1);

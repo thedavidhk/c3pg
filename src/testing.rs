@@ -26,17 +26,25 @@ impl Display for TestSuite {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            r#"#include <gtest/gtest.h>
+            r"#include <gtest/gtest.h>
 
 TEST({}, hello_test)
 {{
     EXPECT_EQ(2 + 2, 4);
-}}"#,
+}}",
             self.name
         )
     }
 }
 
+/// Create a new gtest source file `test_<name>.cpp` in the test directory.
+///
+/// If the file already exists, this is a no-op.
+///
+/// # Errors
+///
+/// Returns an error if the test directory cannot be created or the file
+/// cannot be written.
 pub fn testing_add(
     runner: impl CommandRunner,
     lvl: LevelFilter,
@@ -53,7 +61,7 @@ pub fn testing_add(
         let path_str = path
             .to_str()
             .ok_or(anyhow!("test file path is not valid unicode"))?;
-        info!("{} already exists.", path_str);
+        info!("{path_str} already exists.");
         return Ok(());
     }
     runner
@@ -66,6 +74,13 @@ pub fn testing_add(
     Ok(())
 }
 
+/// Build the project's test targets via `cmake --build --target <name>_tests`.
+///
+/// Does nothing if testing is disabled in the config.
+///
+/// # Errors
+///
+/// Returns an error if the `cmake --build` command fails.
 pub fn testing_build(
     runner: impl CommandRunner,
     lvl: LevelFilter,
@@ -92,6 +107,13 @@ pub fn testing_build(
     Ok(())
 }
 
+/// Build and run the project's test suite via `cmake` and `ctest`.
+///
+/// Does nothing if testing is disabled in the config.
+///
+/// # Errors
+///
+/// Returns an error if the test build or `ctest` execution fails.
 pub fn testing_run(
     runner: impl CommandRunner,
     lvl: LevelFilter,

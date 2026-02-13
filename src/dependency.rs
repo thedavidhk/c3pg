@@ -11,6 +11,7 @@ pub struct Dependency {
 }
 
 impl Dependency {
+    #[must_use] 
     pub fn matches(&self, other: &Dependency) -> bool {
         self.name == other.name
             && (self.version.is_none() || other.version.is_none() || self.version == other.version)
@@ -50,10 +51,10 @@ impl fmt::Display for Dependency {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.name)?;
         if let Some(version) = &self.version {
-            write!(f, "/{}", version)?;
+            write!(f, "/{version}")?;
         }
         if let Some(channel) = &self.channel {
-            write!(f, "@{}", channel)?;
+            write!(f, "@{channel}")?;
         }
         Ok(())
     }

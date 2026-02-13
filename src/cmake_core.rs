@@ -75,11 +75,11 @@ impl Target {
             name: name.into(),
             kind: TargetKind::Executable,
             sources: vec![],
-            include_dirs: Default::default(),
-            compile_defs: Default::default(),
-            compile_opts: Default::default(),
-            link_libs: Default::default(),
-            features: Default::default(),
+            include_dirs: ScopedList::default(),
+            compile_defs: ScopedList::default(),
+            compile_opts: ScopedList::default(),
+            link_libs: ScopedList::default(),
+            features: ScopedList::default(),
             properties: vec![],
         }
     }
@@ -90,35 +90,42 @@ impl Target {
         }
     }
 
+    #[must_use]
     pub fn src(mut self, path: impl Into<Value>) -> Self {
         self.sources.push(path.into());
         self
     }
+    #[must_use]
     pub fn srcs<I: IntoIterator<Item = Value>>(mut self, paths: I) -> Self {
-        self.sources.extend(paths.into_iter().map(Into::into));
+        self.sources.extend(paths);
         self
     }
 
+    #[must_use]
     pub fn include(mut self, scope: Scope, dir: impl Into<Value>) -> Self {
         self.include_dirs.push(scope, dir);
         self
     }
 
+    #[must_use]
     pub fn def(mut self, scope: Scope, def: impl Into<Value>) -> Self {
         self.compile_defs.push(scope, def.into());
         self
     }
 
+    #[must_use]
     pub fn copt(mut self, scope: Scope, flag: impl Into<Value>) -> Self {
         self.compile_opts.push(scope, flag.into());
         self
     }
 
+    #[must_use]
     pub fn link(mut self, scope: Scope, lib: impl Into<Value>) -> Self {
         self.link_libs.push(scope, lib.into());
         self
     }
 
+    #[must_use]
     pub fn prop(mut self, key: impl Into<String>, val: impl Into<Value>) -> Self {
         self.properties.push((key.into(), val.into()));
         self
@@ -190,10 +197,11 @@ impl TestSuite {
         Self {
             aggregate_target: name.into(),
             framework,
-            entries: Default::default(),
+            entries: Vec::default(),
         }
     }
-    pub fn add(mut self, e: TestEntry) -> Self {
+    #[must_use]
+    pub fn with_entry(mut self, e: TestEntry) -> Self {
         self.entries.push(e);
         self
     }
@@ -207,16 +215,19 @@ impl Project {
         }
     }
 
+    #[must_use]
     pub fn version(mut self, v: impl Into<String>) -> Self {
         self.version = Some(v.into());
         self
     }
 
+    #[must_use] 
     pub fn lang(mut self, langs: &[&'static str]) -> Self {
         self.languages = langs.to_vec();
         self
     }
 
+    #[must_use]
     pub fn set_var(mut self, name: impl Into<String>, value: impl Into<Value>) -> Self {
         self.settings.push(CMakeSetting {
             name: name.into(),
@@ -225,6 +236,7 @@ impl Project {
         self
     }
 
+    #[must_use]
     pub fn set_on(mut self, name: impl Into<String>) -> Self {
         self.settings.push(CMakeSetting {
             name: name.into(),
@@ -233,32 +245,44 @@ impl Project {
         self
     }
 
+    #[must_use]
     pub fn include(mut self, path: impl Into<Value>) -> Self {
         self.includes.push(path.into());
         self
     }
 
+    #[must_use] 
     pub fn find_package(mut self, package: Package) -> Self {
         self.packages.push(package);
         self
     }
 
+    #[must_use] 
     pub fn target(mut self, t: Target) -> Self {
         self.targets.push(t);
         self
     }
 
+    #[must_use] 
     pub fn with_tests(mut self, suite: TestSuite) -> Self {
         self.tests = Some(suite);
         self
     }
 
+    #[must_use] 
     pub fn languages(mut self, arg: &[&'static str; 1]) -> Self {
         self.languages = arg.into();
         self
     }
 
-    /// Render a complete CMakeLists.txt
+    /// Render a complete `CMakeLists.txt` string from this project definition.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the project contains an invalid configuration
+    /// (e.g. an `INTERFACE` library with sources) or an internal formatting
+    /// error occurs.
+    #[allow(clippy::too_many_lines)]
     pub fn emit(&self) -> Result<String> {
         let mut out = String::new();
 
@@ -287,7 +311,7 @@ impl Project {
             emit_val(&mut out, value.clone())?;
             writeln!(&mut out, ")")?;
         }
-        writeln!(&mut out, "")?;
+        writeln!(&mut out)?;
 
         // ---- includes ----
         for inc in &self.includes {
@@ -295,7 +319,7 @@ impl Project {
             emit_val(&mut out, inc.clone())?;
             writeln!(&mut out, ")")?;
         }
-        writeln!(&mut out, "")?;
+        writeln!(&mut out)?;
 
         // ---- find_package ----
         for p in &self.packages {
@@ -309,12 +333,12 @@ impl Project {
             if !p.components.is_empty() {
                 write!(&mut out, " COMPONENTS")?;
                 for c in &p.components {
-                    write!(&mut out, " {}", c)?;
+                    write!(&mut out, " {c}")?;
                 }
             }
             writeln!(&mut out, ")")?;
         }
-        writeln!(&mut out, "")?;
+        writeln!(&mut out)?;
 
         // ---- targets ----
         for t in &self.targets {
@@ -419,7 +443,7 @@ impl Project {
                     writeln!(&mut out, ")")?;
 
                     write!(&mut out, "file(WRITE ")?;
-                    emit_val(&mut out, Value::Raw(format!("${{{}}}", inline_main_var)))?;
+                    emit_val(&mut out, Value::Raw(format!("${{{inline_main_var}}}")))?;
                     write!(&mut out, " ")?;
                     emit_val(&mut out, Value::Bracket(inline_main_body.clone()))?;
                     writeln!(&mut out, ")")?;
@@ -504,7 +528,7 @@ fn emit_scoped_list(
         return Ok(());
     }
 
-    writeln!(out, "{}({}", cmd, target)?;
+    writeln!(out, "{cmd}({target}")?;
     if !list.privs.is_empty() {
         writeln!(out, "    PRIVATE")?;
         for v in &list.privs {
@@ -539,7 +563,7 @@ fn emit_val(out: &mut String, v: Value) -> anyhow::Result<()> {
             write!(out, "{}", q(&s))?;
         }
         Value::Raw(s) => {
-            write!(out, "{}", s)?;
+            write!(out, "{s}")?;
         }
         Value::List(xs) => {
             // ;-joined list; escape semicolons in strings
@@ -550,7 +574,7 @@ fn emit_val(out: &mut String, v: Value) -> anyhow::Result<()> {
                 }
                 match x {
                     Value::Str(s) => write!(out, "{}", s.replace(';', "\\;"))?,
-                    Value::Raw(s) => write!(out, "{}", s)?,
+                    Value::Raw(s) => write!(out, "{s}")?,
                     Value::List(_) => {
                         anyhow::bail!("nested lists are not supported in Value::List")
                     }
@@ -563,7 +587,7 @@ fn emit_val(out: &mut String, v: Value) -> anyhow::Result<()> {
         }
         Value::Bracket(body) => {
             // raw multi-line block using [=[ ... ]=]
-            write!(out, "[=[\n{}]=]", body)?;
+            write!(out, "[=[\n{body}]=]")?;
         }
     }
     Ok(())
@@ -593,15 +617,15 @@ fn q(s: &str) -> String {
 impl Default for Project {
     fn default() -> Self {
         Self {
-            name: Default::default(),
+            name: String::default(),
             version: Some("0.1.0".to_string()),
             cmake_min: "3.21".to_string(),
             languages: vec!["CXX"],
-            targets: Default::default(),
-            packages: Default::default(),
-            settings: Default::default(),
-            tests: Default::default(),
-            includes: Default::default(),
+            targets: Vec::default(),
+            packages: Vec::default(),
+            settings: Vec::default(),
+            tests: Option::default(),
+            includes: Vec::default(),
         }
     }
 }

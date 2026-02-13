@@ -10,7 +10,13 @@ use crate::{
 use anyhow::Result;
 use walkdir::WalkDir;
 
-/// Generate a complete CMakeLists.txt string from the project configuration.
+/// Generate a complete `CMakeLists.txt` string from the project configuration.
+///
+/// Source files are discovered from the `src/` and test directories on disk.
+///
+/// # Errors
+///
+/// Returns an error if the underlying [`Project::emit`](crate::cmake_core::Project::emit) call fails.
 pub fn generate_cmakelists(config: &Config) -> Result<String> {
     let project_name = &config.project.name;
     let lib_name = format!("lib{project_name}");
@@ -93,7 +99,7 @@ pub fn generate_cmakelists(config: &Config) -> Result<String> {
         let tests_target = format!("{project_name}_tests");
         let suite = entries.fold(
             TestSuite::new_aggregate(&tests_target, gtest),
-            |acc, e| acc.add(e),
+            super::cmake_core::TestSuite::with_entry,
         );
 
         project = project.with_tests(suite);
@@ -102,13 +108,13 @@ pub fn generate_cmakelists(config: &Config) -> Result<String> {
     project.emit()
 }
 
-const GTEST_MAIN_BODY: &str = r#"
+const GTEST_MAIN_BODY: &str = r"
 #include <gtest/gtest.h>
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
-"#;
+";
 
 const SOURCE_EXTENSIONS: [&str; 4] = ["c", "cpp", "cxx", "cc"];
 
@@ -126,14 +132,13 @@ fn cmake_list_dir_value(path: &str) -> Value {
 fn find_files(root: &str, exts: &[&str]) -> Vec<String> {
     WalkDir::new(root)
         .into_iter()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|e| e.file_type().is_file())
         .filter(|e| {
             e.path()
                 .extension()
                 .and_then(|ext| ext.to_str())
-                .map(|ext| exts.contains(&ext))
-                .unwrap_or(false)
+                .is_some_and(|ext| exts.contains(&ext))
         })
         .map(|e| e.into_path().to_string_lossy().into_owned())
         .collect()
@@ -151,8 +156,7 @@ fn sanitize_to_c_identifier(s: &str) -> String {
     if out
         .chars()
         .next()
-        .map(|c| c.is_ascii_digit())
-        .unwrap_or(false)
+        .is_some_and(|c| c.is_ascii_digit())
     {
         out.insert(0, '_');
     }

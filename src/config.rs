@@ -19,7 +19,7 @@ pub struct Config {
 impl fmt::Display for Config {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let contents = toml::to_string_pretty(self).expect("Could not serialize Config to toml");
-        write!(f, "{}", contents)
+        write!(f, "{contents}")
     }
 }
 
@@ -73,7 +73,7 @@ fn serialize_dependencies<S>(deps: &[Dependency], serializer: S) -> Result<S::Ok
 where
     S: Serializer,
 {
-    let dep_strings: Vec<String> = deps.iter().map(|dep| dep.to_string()).collect();
+    let dep_strings: Vec<String> = deps.iter().map(std::string::ToString::to_string).collect();
     dep_strings.serialize(serializer)
 }
 
@@ -108,7 +108,7 @@ pub struct CMakeConfig {
 impl Default for CMakeConfig {
     fn default() -> Self {
         Self {
-            standard: Default::default(),
+            standard: CppStandard::default(),
             export_compile_commands: true,
             silent: false,
         }

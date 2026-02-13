@@ -1,6 +1,6 @@
 use c3pg::cmake_core::{
-    DiscoverMode, LibType, Package, Project, Scope::*, Target, TestEntry, TestFramework, TestSuite,
-    Value::*,
+    DiscoverMode, LibType, Package, Project, Scope::PRIVATE, Target, TestEntry, TestFramework, TestSuite,
+    Value::{Str, Raw},
 };
 
 fn main() {
@@ -21,13 +21,13 @@ fn main() {
     let gtest = TestFramework::GoogleTest {
         config_mode: true,
         inline_main_var: "C3PG_GTEST_MAIN".into(),
-        inline_main_body: r#"
+        inline_main_body: r"
 #include <gtest/gtest.h>
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
-"#
+"
         .trim()
         .into(),
         discover_mode: DiscoverMode::PreTest,
@@ -38,7 +38,7 @@ int main(int argc, char** argv) {
         .iter()
         .map(|p| {
             let base =
-                sanitize_to_c_identifier(p.split('/').last().unwrap().split('.').next().unwrap());
+                sanitize_to_c_identifier(p.split('/').next_back().unwrap().split('.').next().unwrap());
             TestEntry {
                 exe_name: base.clone(),
                 sources: vec![Str(p.to_string()), Raw("${C3PG_GTEST_MAIN}".into())],
@@ -50,7 +50,7 @@ int main(int argc, char** argv) {
 
     let suite = entries.fold(
         TestSuite::new_aggregate("examples_tests", gtest),
-        |acc, e| acc.add(e),
+        c3pg::cmake_core::TestSuite::with_entry,
     );
 
     // Project (general knobs via set_var + include)
@@ -86,8 +86,7 @@ fn sanitize_to_c_identifier(s: &str) -> String {
     if out
         .chars()
         .next()
-        .map(|c| c.is_ascii_digit())
-        .unwrap_or(false)
+        .is_some_and(|c| c.is_ascii_digit())
     {
         out.insert(0, '_');
     }

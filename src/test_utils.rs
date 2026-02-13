@@ -16,6 +16,7 @@ pub struct MockCommandRunner {
 impl MockCommandRunner {
     /// Create a mock runner where unmatched commands return the given output.
     /// Pass `None` to simulate command failure by default.
+    #[must_use] 
     pub fn new(output: Option<String>) -> Self {
         let success = output.is_some();
         let stdout = output.unwrap_or_default();
@@ -41,7 +42,7 @@ impl MockCommandRunner {
     pub fn on(&self, cmd: &str, args_contain: &[&str], result: CommandResult) -> &Self {
         self.responses.borrow_mut().push(MockResponse {
             cmd: cmd.to_string(),
-            args_contain: args_contain.iter().map(|s| s.to_string()).collect(),
+            args_contain: args_contain.iter().map(std::string::ToString::to_string).collect(),
             result,
         });
         self
@@ -116,7 +117,7 @@ impl CommandRunner for MockCommandRunner {
                 && resp
                     .args_contain
                     .iter()
-                    .all(|needle| args.iter().any(|a| *a == needle.as_str()))
+                    .all(|needle| args.contains(&needle.as_str()))
             {
                 return Ok(resp.result.clone());
             }

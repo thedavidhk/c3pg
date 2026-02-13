@@ -24,7 +24,7 @@ fn with_cwd<F, R>(dir: &Path, f: F) -> R
 where
     F: FnOnce() -> R,
 {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = CWD_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let original = std::env::current_dir().unwrap();
     std::env::set_current_dir(dir).unwrap();
     let result = std::panic::catch_unwind(AssertUnwindSafe(f));

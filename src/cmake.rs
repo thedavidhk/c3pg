@@ -5,7 +5,7 @@ use std::{fmt::Display, str::FromStr};
 
 use crate::command_runner::{tool_stream_mode, CommandRunner};
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Copy)]
 pub enum BuildType {
     #[default]
     Debug,
@@ -15,7 +15,7 @@ pub enum BuildType {
 
 impl Display for BuildType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -25,8 +25,7 @@ impl FromStr for BuildType {
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "debug" => Ok(BuildType::Debug),
-            "relwithdebinfo" => Ok(BuildType::RelWithDebInfo),
-            "rel_with_deb_info" => Ok(BuildType::RelWithDebInfo),
+            "relwithdebinfo" | "rel_with_deb_info" => Ok(BuildType::RelWithDebInfo),
             "release" => Ok(BuildType::Release),
             _ => bail!("Could not match string {} to BuildType", s),
         }
@@ -76,6 +75,13 @@ impl FromStr for CppStandard {
 pub struct CMake;
 
 impl CMake {
+    /// Run `cmake --configure` followed by `cmake --build`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if either the configure or build step fails (e.g.
+    /// `cmake` is not installed, the toolchain file is missing, or the
+    /// build itself has compilation errors).
     pub fn build(
         command_runner: &impl CommandRunner,
         build_type: BuildType,
@@ -97,12 +103,12 @@ impl CMake {
         conf_args.extend(
             cmake_configure_verbosity_args(lvl)
                 .iter()
-                .map(|s| s.to_string()),
+                .map(std::string::ToString::to_string),
         );
 
         command_runner
             .command("cmake")
-            .args(conf_args.iter().map(|s| s.as_str()))
+            .args(conf_args.iter().map(std::string::String::as_str))
             .envs(build_env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
             .stream_mode(tool_stream_mode(lvl))
             .run()?
@@ -113,12 +119,12 @@ impl CMake {
         build_args.extend(
             cmake_build_verbosity_args(lvl)
                 .iter()
-                .map(|s| s.to_string()),
+                .map(std::string::ToString::to_string),
         );
 
         command_runner
             .command("cmake")
-            .args(build_args.iter().map(|s| s.as_str()))
+            .args(build_args.iter().map(std::string::String::as_str))
             .envs(build_env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
             .stream_mode(tool_stream_mode(lvl))
             .run()?
@@ -131,8 +137,7 @@ impl CMake {
 fn cmake_configure_verbosity_args(lvl: LevelFilter) -> &'static [&'static str] {
     // CMake >=3.15 supports --log-level: ERROR|WARNING|NOTICE|STATUS|VERBOSE|DEBUG|TRACE
     match lvl {
-        LevelFilter::Off | LevelFilter::Error => &["--log-level", "ERROR"],
-        LevelFilter::Warn => &["--log-level", "ERROR"],
+        LevelFilter::Off | LevelFilter::Error | LevelFilter::Warn => &["--log-level", "ERROR"],
         LevelFilter::Info => &["--log-level", "WARNING"],
         LevelFilter::Debug => &["--log-level", "STATUS"],
         LevelFilter::Trace => &["--log-level", "VERBOSE"],

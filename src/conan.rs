@@ -19,6 +19,15 @@ pub struct Conan {
 }
 
 impl Conan {
+    /// Build a [`Conan`] instance from the project configuration.
+    ///
+    /// If no explicit remote is set in `config`, the first remote reported
+    /// by `conan remote list` is used.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no Conan remote is configured and `conan remote
+    /// list` fails or returns an empty list.
     pub fn from_config(runner: impl CommandRunner, config: &Config) -> Result<Self> {
         Ok(Self {
             bin: config.conan.bin.clone(),
@@ -32,6 +41,13 @@ impl Conan {
         })
     }
 
+    /// Run `conan install` for the project in `dir`, writing outputs to
+    /// `out_dir`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `conan install` command fails (e.g. a
+    /// dependency cannot be built or downloaded).
     pub fn install(
         &self,
         runner: &impl CommandRunner,
@@ -50,11 +66,11 @@ impl Conan {
             dir.into(),
         ];
 
-        args.extend(conan_verbosity_args(lvl).iter().map(|s| s.to_string()));
+        args.extend(conan_verbosity_args(lvl).iter().map(std::string::ToString::to_string));
 
         runner
             .command(&self.bin)
-            .args(args.iter().map(|s| s.as_str()))
+            .args(args.iter().map(std::string::String::as_str))
             .stream_mode(tool_stream_mode(lvl))
             .run()?
             .expect_success("Conan install failed")?;
@@ -62,6 +78,13 @@ impl Conan {
         Ok(())
     }
 
+    /// Search the configured remote for the latest stable version matching
+    /// `expr` and return it, or `None` if no match is found.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `expr` cannot be parsed as a dependency
+    /// specifier or the `conan search` command fails.
     pub fn get_latest_matching_dependency(
         &self,
         runner: impl CommandRunner,
@@ -69,13 +92,13 @@ impl Conan {
     ) -> Result<Option<Dependency>> {
         let dependency =
             Dependency::from_str(expr).map_err(|e| anyhow!("Could not parse {}: {}", expr, e))?;
-        self.find_dependency(runner, dependency)
+        self.find_dependency(runner, &dependency)
     }
 
     fn find_dependency(
         &self,
         runner: impl CommandRunner,
-        dependency: Dependency,
+        dependency: &Dependency,
     ) -> Result<Option<Dependency>> {
         let search_result = self.search(runner, dependency.name.as_str())?;
 
@@ -83,7 +106,7 @@ impl Conan {
         let mut pairs: Vec<(Version, Dependency)> = search_result
             .lines()
             .filter_map(|l| Dependency::from_str(l).ok())
-            .filter(|d| d.matches(&dependency))
+            .filter(|d| d.matches(dependency))
             .filter_map(|d| {
                 // adjust if your version access differs
                 Version::parse(d.version.clone()?.as_str())
@@ -124,7 +147,7 @@ impl Conan {
             .next()
             .ok_or(anyhow!("remotes list is empty"))?;
         let remote_name = remote
-            .split(":")
+            .split(':')
             .next()
             .ok_or(anyhow!("remote not found"))?;
         Ok(String::from(remote_name))
@@ -138,7 +161,7 @@ impl fmt::Display for Conan {
         } else {
             self.requirements
                 .iter()
-                .map(|dep| format!("        self.requires(\"{}\")", dep))
+                .map(|dep| format!("        self.requires(\"{dep}\")"))
                 .collect::<Vec<_>>()
                 .join("\n")
         };
@@ -172,6 +195,7 @@ class {class_name}(ConanFile):
 ///
 /// These are typically needed so cmake picks up the same compiler that
 /// Conan was configured for.
+#[must_use] 
 pub fn parse_conan_build_env(cache_dir: &str) -> Vec<(String, String)> {
     use std::fs;
     use std::path::Path;
@@ -179,9 +203,8 @@ pub fn parse_conan_build_env(cache_dir: &str) -> Vec<(String, String)> {
     let dir = Path::new(cache_dir);
     let mut env = Vec::new();
 
-    let entries = match fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return env,
+    let Ok(entries) = fs::read_dir(dir) else {
+        return env;
     };
 
     for entry in entries.flatten() {
@@ -208,8 +231,7 @@ pub fn parse_conan_build_env(cache_dir: &str) -> Vec<(String, String)> {
 
 fn conan_verbosity_args(lvl: LevelFilter) -> &'static [&'static str] {
     match lvl {
-        LevelFilter::Off => &["-vquiet"],
-        LevelFilter::Error => &["-vquiet"],
+        LevelFilter::Off | LevelFilter::Error => &["-vquiet"],
         LevelFilter::Warn => &["-verror"],
         LevelFilter::Info => &["-vwarning"],
         LevelFilter::Debug => &["-vstatus"],
