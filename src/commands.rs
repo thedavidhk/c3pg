@@ -11,7 +11,7 @@ use crate::{
     traits::{FromFile, ToFile},
 };
 use crate::{
-    cmake::{BuildType, CMake, CppStandard},
+    cmake::{BuildType, CMake, CppStandard, Sanitizers},
     command_runner::CommandRunner,
 };
 use crate::{
@@ -134,9 +134,11 @@ pub fn cmd_build(
     runner: impl CommandRunner,
     build_type: BuildType,
     lvl: LevelFilter,
+    sanitizers: &Sanitizers,
 ) -> Result<()> {
+    sanitizers.validate()?;
     let config = build_config(&runner)?;
-    cmd_build_inner(&runner, &config, build_type, lvl)
+    cmd_build_inner(&runner, &config, build_type, lvl, sanitizers)
 }
 
 fn cmd_build_inner(
@@ -144,6 +146,7 @@ fn cmd_build_inner(
     config: &Config,
     build_type: BuildType,
     lvl: LevelFilter,
+    sanitizers: &Sanitizers,
 ) -> Result<()> {
     let cache_dir = PathBuf::from(&config.project.cache_dir);
 
@@ -160,8 +163,16 @@ fn cmd_build_inner(
     // Read the build environment (CC, CXX, ...) that Conan generated so
     // cmake picks up the correct compiler.
     let build_env = conan::parse_conan_build_env(&cache_dir);
-    CMake::build(runner, build_type, &cache_dir, &cache_dir, lvl, &build_env)
-        .context("cmake build failed")?;
+    CMake::build(
+        runner,
+        build_type,
+        &cache_dir,
+        &cache_dir,
+        lvl,
+        &build_env,
+        sanitizers,
+    )
+    .context("cmake build failed")?;
 
     ui::status("Finished", "build");
     Ok(())
@@ -175,10 +186,16 @@ fn cmd_build_inner(
 ///
 /// Returns an error if the build step fails or the compiled binary cannot
 /// be executed.
-pub fn cmd_run(runner: impl CommandRunner, build_type: BuildType, lvl: LevelFilter) -> Result<()> {
+pub fn cmd_run(
+    runner: impl CommandRunner,
+    build_type: BuildType,
+    lvl: LevelFilter,
+    sanitizers: &Sanitizers,
+) -> Result<()> {
+    sanitizers.validate()?;
     // Load config once; cmd_build_with_config avoids a second load.
     let config = build_config(&runner)?;
-    cmd_build_inner(&runner, &config, build_type, lvl)?;
+    cmd_build_inner(&runner, &config, build_type, lvl, sanitizers)?;
 
     let cache_dir = PathBuf::from(&config.project.cache_dir);
     let binary_name = if cfg!(target_os = "windows") {
@@ -210,6 +227,7 @@ pub fn cmd_run(runner: impl CommandRunner, build_type: BuildType, lvl: LevelFilt
 /// Returns an error if the project config cannot be loaded, the test file
 /// cannot be created, or the test build/run fails.
 pub fn cmd_test(runner: impl CommandRunner, args: TestArgs, lvl: LevelFilter) -> Result<()> {
+    args.sanitizers.validate()?;
     let mut config = build_config(&runner)?;
     if let Some(crate::cli::TestOnlySubcmds::Add { name }) = args.command {
         // Lazily add gtest on first test creation
