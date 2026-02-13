@@ -8,6 +8,7 @@ pub mod cmake_gen;
 pub mod command_runner;
 pub mod commands;
 pub mod conan;
+pub mod diagnostics;
 pub mod format;
 pub mod config;
 pub mod dependency;
