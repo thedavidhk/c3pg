@@ -6,7 +6,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use c3pg::cli::{TestArgs, TestOnlySubcmds};
-use c3pg::cmake::{BuildType, CppStandard};
+use c3pg::cmake::{BuildType, CppStandard, Sanitizers};
 use c3pg::commands::*;
 use c3pg::test_utils::MockCommandRunner;
 use c3pg::traits::FromFile;
@@ -278,7 +278,7 @@ fn test_build_invokes_conan_install_then_cmake() {
     let runner = mock_with_conan_responses();
 
     with_cwd(tmp.path(), || {
-        cmd_build(&runner, BuildType::Debug, LevelFilter::Info).unwrap();
+        cmd_build(&runner, BuildType::Debug, LevelFilter::Info, &Sanitizers::default()).unwrap();
     });
 
     // Should have run conan install
@@ -306,7 +306,7 @@ fn test_build_passes_build_type() {
     let runner = mock_with_conan_responses();
 
     with_cwd(tmp.path(), || {
-        cmd_build(&runner, BuildType::Release, LevelFilter::Info).unwrap();
+        cmd_build(&runner, BuildType::Release, LevelFilter::Info, &Sanitizers::default()).unwrap();
     });
 
     // Conan should receive build_type=Release
@@ -324,7 +324,7 @@ fn test_run_builds_then_executes_binary() {
     runner.on_success("build/runtest", &[], "Hello from C3PG!");
 
     with_cwd(tmp.path(), || {
-        cmd_run(&runner, BuildType::Debug, LevelFilter::Info).unwrap();
+        cmd_run(&runner, BuildType::Debug, LevelFilter::Info, &Sanitizers::default()).unwrap();
     });
 
     // Build commands should have run
@@ -347,6 +347,7 @@ fn test_test_add_creates_file() {
     let args = TestArgs {
         filter: None,
         jobs: None,
+        sanitizers: Sanitizers::default(),
         command: Some(TestOnlySubcmds::Add {
             name: "math".to_string(),
         }),
@@ -384,6 +385,7 @@ fn test_test_add_skips_existing() {
     let args = TestArgs {
         filter: None,
         jobs: None,
+        sanitizers: Sanitizers::default(),
         command: Some(TestOnlySubcmds::Add {
             name: "existing".to_string(),
         }),
@@ -410,6 +412,7 @@ fn test_test_run_invokes_cmake_and_ctest() {
     let args = TestArgs {
         filter: None,
         jobs: None,
+        sanitizers: Sanitizers::default(),
         command: None, // no subcommand => run tests
     };
 
@@ -436,6 +439,7 @@ fn test_test_run_with_filter_and_jobs() {
     let args = TestArgs {
         filter: Some("math".to_string()),
         jobs: Some(4),
+        sanitizers: Sanitizers::default(),
         command: None,
     };
 
@@ -455,6 +459,7 @@ fn test_test_run_with_no_tests_prints_message() {
     let args = TestArgs {
         filter: None,
         jobs: None,
+        sanitizers: Sanitizers::default(),
         command: None,
     };
 

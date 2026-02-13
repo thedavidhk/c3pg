@@ -39,8 +39,12 @@ fn run() -> Result<()> {
         } => cmd_new(&runner, &sandbox_name, no_git, standard.unwrap_or_default())?,
         Commands::Add { dependency } => cmd_add(&runner, &dependency)?,
         Commands::Remove { dependency } => cmd_remove(&runner, &dependency)?,
-        Commands::Build { release } => cmd_build(&runner, build_type(release), lvl)?,
-        Commands::Run { release } => cmd_run(&runner, build_type(release), lvl)?,
+        Commands::Build { release, sanitizers } => {
+            cmd_build(&runner, build_type(release), lvl, &sanitizers)?;
+        }
+        Commands::Run { release, sanitizers } => {
+            cmd_run(&runner, build_type(release), lvl, &sanitizers)?;
+        }
         Commands::Test(testargs) => cmd_test(&runner, testargs, lvl)?,
         Commands::Clean => cmd_clean(&runner)?,
     }

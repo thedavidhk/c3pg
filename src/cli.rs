@@ -2,7 +2,7 @@ use clap::{ArgAction, Parser, Subcommand};
 use clap_derive::Args;
 use clap_verbosity_flag::{InfoLevel, Verbosity};
 
-use crate::cmake::CppStandard;
+use crate::cmake::{CppStandard, Sanitizers};
 
 /// c3pg: Create, manage, and run C++ project sandboxes
 #[derive(Parser, Debug)]
@@ -38,6 +38,9 @@ pub struct TestArgs {
     /// Number of parallel jobs
     #[arg(short, long)]
     pub jobs: Option<u8>,
+
+    #[command(flatten)]
+    pub sanitizers: Sanitizers,
 
     /// Other test-related subcommands
     #[command(subcommand)]
@@ -75,12 +78,16 @@ pub enum Commands {
         /// Build in release mode (default: debug)
         #[arg(long, short)]
         release: bool,
+        #[command(flatten)]
+        sanitizers: Sanitizers,
     },
     /// Run the current sandbox project (build if necessary)
     Run {
         /// Build in release mode (default: debug)
         #[arg(long, short)]
         release: bool,
+        #[command(flatten)]
+        sanitizers: Sanitizers,
     },
     /// Testing
     Test(TestArgs),
