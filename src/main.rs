@@ -1,4 +1,4 @@
-use c3pg::{cmake, cli, command_runner, commands, format, ui};
+use c3pg::{cmake, cli, command_runner, commands, diagnostics, format, ui};
 
 use anyhow::Result;
 use clap::Parser;
@@ -76,6 +76,11 @@ fn main() {
             ui::error(&format!("{e}"));
             for cause in e.chain().skip(1) {
                 eprintln!("  caused by: {cause}");
+            }
+            // Scan the full error chain for known patterns and print a hint.
+            let full = format!("{e:#}");
+            if let Some(hint) = diagnostics::hint_for_error(&full) {
+                eprintln!("  {hint}");
             }
             std::process::exit(1);
         }
