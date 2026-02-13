@@ -1,621 +1,232 @@
-use anyhow::Result;
-use std::fmt::Write as _;
+use std::path::Path;
 
-#[derive(Debug, Clone)]
-pub enum Value {
-    Str(String),      // normal argument, auto-quoted if needed
-    Raw(String),      // literal: emitted exactly as-is (for ${VAR}, $<GENEX>, etc.)
-    List(Vec<Value>), // ;-joined values
-    Bracket(String),  // multi-line or raw block, emitted as [=[ … ]=]
-}
-
-impl<S: Into<String>> From<S> for Value {
-    fn from(s: S) -> Self {
-        Value::Str(s.into())
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LibType {
-    Static,
-    Shared,
-    Interface,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Scope {
-    PRIVATE,
-    PUBLIC,
-    INTERFACE,
-}
-
-#[derive(Debug, Default, Clone)]
-pub struct ScopedList {
-    privs: Vec<Value>,
-    pubs: Vec<Value>,
-    ifcs: Vec<Value>,
-}
-impl ScopedList {
-    pub fn push(&mut self, scope: Scope, v: impl Into<Value>) {
-        match scope {
-            Scope::PRIVATE => self.privs.push(v.into()),
-            Scope::PUBLIC => self.pubs.push(v.into()),
-            Scope::INTERFACE => self.ifcs.push(v.into()),
-        }
-    }
-    pub fn extend(&mut self, scope: Scope, vs: impl IntoIterator<Item = Value>) {
-        for v in vs {
-            self.push(scope, v);
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Target {
-    pub name: String,
-    kind: TargetKind,
-    sources: Vec<Value>,
-    include_dirs: ScopedList,
-    compile_defs: ScopedList,
-    compile_opts: ScopedList,
-    link_libs: ScopedList,
-    features: ScopedList,
-    properties: Vec<(String, Value)>,
-}
-
-#[derive(Debug, Clone)]
-pub enum TargetKind {
-    Executable,
-    Library(LibType),
-}
-
-impl Target {
-    pub fn executable(name: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-            kind: TargetKind::Executable,
-            sources: vec![],
-            include_dirs: Default::default(),
-            compile_defs: Default::default(),
-            compile_opts: Default::default(),
-            link_libs: Default::default(),
-            features: Default::default(),
-            properties: vec![],
-        }
-    }
-    pub fn library(name: impl Into<String>, ty: LibType) -> Self {
-        Self {
-            kind: TargetKind::Library(ty),
-            ..Self::executable(name)
-        }
-    }
-
-    pub fn src(mut self, path: impl Into<Value>) -> Self {
-        self.sources.push(path.into());
-        self
-    }
-    pub fn srcs<I: IntoIterator<Item = Value>>(mut self, paths: I) -> Self {
-        self.sources.extend(paths.into_iter().map(Into::into));
-        self
-    }
-
-    pub fn include(mut self, scope: Scope, dir: impl Into<Value>) -> Self {
-        self.include_dirs.push(scope, dir);
-        self
-    }
-
-    pub fn def(mut self, scope: Scope, def: impl Into<Value>) -> Self {
-        self.compile_defs.push(scope, def.into());
-        self
-    }
-
-    pub fn copt(mut self, scope: Scope, flag: impl Into<Value>) -> Self {
-        self.compile_opts.push(scope, flag.into());
-        self
-    }
-
-    pub fn link(mut self, scope: Scope, lib: impl Into<Value>) -> Self {
-        self.link_libs.push(scope, lib.into());
-        self
-    }
-
-    pub fn prop(mut self, key: impl Into<String>, val: impl Into<Value>) -> Self {
-        self.properties.push((key.into(), val.into()));
-        self
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Project {
-    pub name: String,
-    pub version: Option<String>,
-    /// e.g. "3.21"
-    pub cmake_min: String,
-    pub languages: Vec<&'static str>, // e.g. ["C", "CXX"]
-    pub language_standard: u16,
-    pub targets: Vec<Target>,
-    pub packages: Vec<Package>,
-    pub settings: Vec<CMakeSetting>,
-    pub includes: Vec<Value>,
-    pub tests: Option<TestSuite>, // CTest/GTest setup
-}
-
-#[derive(Debug, Clone)]
-pub struct Package {
-    pub name: String,
-    pub required: bool,
-    pub config_only: bool,
-    pub components: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct CMakeSetting {
-    pub name: String,
-    pub value: Value,
-}
-
-#[derive(Debug, Clone)]
-pub struct TestSuite {
-    aggregate_target: String,
-    framework: TestFramework,
-    entries: Vec<TestEntry>,
-}
-
-#[derive(Debug, Clone)]
-pub enum TestFramework {
-    GoogleTest {
-        config_mode: bool,        // find_package(GTest CONFIG REQUIRED)
-        inline_main_var: String,  // variable name for the emitted helper file
-        inline_main_body: String, // C++ text for custom main
-        discover_mode: DiscoverMode,
+use crate::{
+    cmake_core::{
+        DiscoverMode, LibType, Project, Scope::PRIVATE, Target, TestEntry, TestFramework,
+        TestSuite, Value,
     },
-}
+    config::Config,
+};
+use anyhow::Result;
+use walkdir::WalkDir;
 
-#[derive(Debug, Clone)]
-pub enum DiscoverMode {
-    PreTest,
-    PostBuild,
-}
+/// Generate a complete CMakeLists.txt string from the project configuration.
+pub fn generate_cmakelists(config: &Config) -> Result<String> {
+    let project_name = &config.project.name;
+    let lib_name = format!("lib{project_name}");
+    let std_str = config.cmake.standard.to_string();
 
-#[derive(Debug, Clone)]
-pub struct TestEntry {
-    pub exe_name: String,          // already sanitized name
-    pub sources: Vec<Value>,       // includes inline_main_var token
-    pub link: Vec<Value>,          // libraries to link (e.g., libexamples, gtest::gtest)
-    pub prefix: String,            // TEST_PREFIX "name."
-    pub cxx_standard: Option<u16>, // emits target_compile_features(... cxx_std_<N>)
-}
+    // Discover source files, making them relative to the CMakeLists.txt location
+    let all_sources = find_files("src", &SOURCE_EXTENSIONS);
+    let lib_sources: Vec<Value> = all_sources
+        .iter()
+        .filter(|p| !p.ends_with("main.cpp"))
+        .map(|p| cmake_list_dir_value(p))
+        .collect();
 
-impl TestSuite {
-    pub fn new_aggregate(name: impl Into<String>, framework: TestFramework) -> Self {
-        Self {
-            aggregate_target: name.into(),
-            framework,
-            entries: Default::default(),
-        }
-    }
-    pub fn add(mut self, e: TestEntry) -> Self {
-        self.entries.push(e);
-        self
-    }
-}
+    let lib = Target::library(&lib_name, LibType::Static)
+        .srcs(lib_sources)
+        .link(PRIVATE, Value::Raw("${CONANDEPS_LEGACY}".into()));
 
-#[derive(Debug, Clone)]
-pub struct GTestConfig {
-    pub tests_target: String, // the test exe target name (must exist in `targets`)
-    pub discover: bool,       // use gtest_discover_tests if true
-    pub require_config_mode: bool, // find_package(GTest CONFIG REQUIRED)
-}
+    let app = Target::executable(project_name)
+        .src(cmake_list_dir_value("src/main.cpp"))
+        .link(PRIVATE, &lib_name);
 
-#[derive(Debug, Clone)]
-pub struct FindPackage {
-    pub name: String,
-    pub required: bool,
-    pub components: Vec<String>,
-    pub config_only: bool, // emit CONFIG
-}
+    let mut project = Project::new(project_name)
+        .languages(&["CXX"])
+        .set_var("CMAKE_CXX_STANDARD", std_str.as_str())
+        .set_on("CMAKE_CXX_STANDARD_REQUIRED")
+        .set_var(
+            "CMAKE_EXPORT_COMPILE_COMMANDS",
+            if config.cmake.export_compile_commands {
+                "ON"
+            } else {
+                "OFF"
+            },
+        )
+        .include("${CMAKE_BINARY_DIR}/conandeps_legacy.cmake")
+        .target(lib)
+        .target(app);
 
-impl Project {
-    pub fn new(name: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-            ..Default::default()
-        }
-    }
+    if config.testing.enabled {
+        let gtest = TestFramework::GoogleTest {
+            config_mode: true,
+            inline_main_var: "C3PG_GTEST_MAIN".into(),
+            inline_main_body: GTEST_MAIN_BODY.trim().into(),
+            discover_mode: DiscoverMode::PreTest,
+        };
 
-    pub fn version(mut self, v: impl Into<String>) -> Self {
-        self.version = Some(v.into());
-        self
-    }
+        let test_files = find_files(&config.testing.dir, &SOURCE_EXTENSIONS);
+        let cxx_std: u16 = std_str.parse().unwrap_or(20);
 
-    pub fn lang(mut self, langs: &[&'static str]) -> Self {
-        self.languages = langs.to_vec();
-        self
-    }
-
-    pub fn set_var(mut self, name: impl Into<String>, value: impl Into<Value>) -> Self {
-        self.settings.push(CMakeSetting {
-            name: name.into(),
-            value: value.into(),
+        let entries = test_files.iter().map(|path| {
+            let base = Path::new(path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("test");
+            let safe_name = sanitize_to_c_identifier(base);
+            TestEntry {
+                exe_name: safe_name.clone(),
+                sources: vec![
+                    cmake_list_dir_value(path),
+                    Value::Raw("${C3PG_GTEST_MAIN}".into()),
+                ],
+                link: vec![
+                    Value::Str(lib_name.clone()),
+                    Value::Raw("gtest::gtest".into()),
+                ],
+                prefix: format!("{base}."),
+                cxx_standard: Some(cxx_std),
+            }
         });
-        self
+
+        let tests_target = format!("{project_name}_tests");
+        let suite = entries.fold(
+            TestSuite::new_aggregate(&tests_target, gtest),
+            |acc, e| acc.add(e),
+        );
+
+        project = project.with_tests(suite);
     }
 
-    pub fn set_on(mut self, name: impl Into<String>) -> Self {
-        self.settings.push(CMakeSetting {
-            name: name.into(),
-            value: "ON".into(),
-        });
-        self
-    }
-
-    pub fn include(mut self, path: impl Into<Value>) -> Self {
-        self.includes.push(path.into());
-        self
-    }
-
-    pub fn find_package(mut self, package: Package) -> Self {
-        self.packages.push(package);
-        self
-    }
-
-    pub fn target(mut self, t: Target) -> Self {
-        self.targets.push(t);
-        self
-    }
-
-    pub fn with_tests(mut self, suite: TestSuite) -> Self {
-        self.tests = Some(suite);
-        self
-    }
-
-    pub fn languages(mut self, arg: &[&'static str; 1]) -> Self {
-        self.languages = arg.into();
-        self
-    }
-
-    /// Render a complete CMakeLists.txt
-    pub fn emit(&self) -> Result<String> {
-        let mut out = String::new();
-
-        // ---- header ----
-        writeln!(
-            &mut out,
-            "cmake_minimum_required(VERSION {})",
-            self.cmake_min
-        )?;
-        if self.languages.is_empty() {
-            writeln!(&mut out, "project({})", q(&self.name))?;
-        } else {
-            writeln!(
-                &mut out,
-                "project({} LANGUAGES {})",
-                q(&self.name),
-                self.languages.join(" ")
-            )?;
-        }
-
-        // ---- generic settings (set(VAR VALUE)) ----
-        for CMakeSetting { name, value } in &self.settings {
-            write!(&mut out, "set(")?;
-            emit_val(&mut out, Value::Raw(name.clone()))?;
-            write!(&mut out, " ")?;
-            emit_val(&mut out, value.clone())?;
-            writeln!(&mut out, ")")?;
-        }
-
-        // ---- includes ----
-        for inc in &self.includes {
-            write!(&mut out, "include(")?;
-            emit_val(&mut out, inc.clone())?;
-            writeln!(&mut out, ")")?;
-        }
-
-        // ---- find_package ----
-        for p in &self.packages {
-            write!(&mut out, "find_package({}", p.name)?;
-            if p.config_only {
-                write!(&mut out, " CONFIG")?;
-            }
-            if p.required {
-                write!(&mut out, " REQUIRED")?;
-            }
-            if !p.components.is_empty() {
-                write!(&mut out, " COMPONENTS")?;
-                for c in &p.components {
-                    write!(&mut out, " {}", c)?;
-                }
-            }
-            writeln!(&mut out, ")")?;
-        }
-
-        // ---- targets ----
-        for t in &self.targets {
-            // minimal validation
-            if matches!(t.kind, TargetKind::Library(LibType::Interface)) && !t.sources.is_empty() {
-                return Err(anyhow::anyhow!(
-                    "INTERFACE library '{}' cannot have sources",
-                    t.name
-                ));
-            }
-
-            match t.kind {
-                TargetKind::Executable => {
-                    write!(&mut out, "add_executable({}", t.name)?;
-                    for s in &t.sources {
-                        write!(&mut out, " ")?;
-                        emit_val(&mut out, s.clone())?;
-                    }
-                    writeln!(&mut out, ")")?;
-                }
-                TargetKind::Library(kind) => {
-                    write!(&mut out, "add_library({}", t.name)?;
-                    write!(
-                        &mut out,
-                        " {}",
-                        match kind {
-                            LibType::Static => "STATIC",
-                            LibType::Shared => "SHARED",
-                            LibType::Interface => "INTERFACE",
-                        }
-                    )?;
-                    if !matches!(kind, LibType::Interface) {
-                        for s in &t.sources {
-                            write!(&mut out, " ")?;
-                            emit_val(&mut out, s.clone())?;
-                        }
-                    }
-                    writeln!(&mut out, ")")?;
-                }
-            }
-
-            // target_* families via a single generic emitter
-            emit_scoped_list(
-                &mut out,
-                "target_include_directories",
-                &t.name,
-                &t.include_dirs,
-            )?;
-            emit_scoped_list(
-                &mut out,
-                "target_compile_definitions",
-                &t.name,
-                &t.compile_defs,
-            )?;
-            emit_scoped_list(&mut out, "target_compile_options", &t.name, &t.compile_opts)?;
-            emit_scoped_list(&mut out, "target_link_libraries", &t.name, &t.link_libs)?;
-            emit_scoped_list(&mut out, "target_compile_features", &t.name, &t.features)?;
-
-            // target properties
-            for (k, v) in &t.properties {
-                write!(
-                    &mut out,
-                    "set_target_properties({} PROPERTIES {} ",
-                    t.name, k
-                )?;
-                emit_val(&mut out, v.clone())?;
-                writeln!(&mut out, ")")?;
-            }
-
-            writeln!(&mut out)?;
-        }
-
-        // ---- tests (optional) ----
-        if let Some(ts) = &self.tests {
-            // CTest boilerplate
-            writeln!(&mut out, "include(CTest)")?;
-            writeln!(&mut out, "enable_testing()")?;
-
-            // Currently only GoogleTest is modeled
-            match &ts.framework {
-                TestFramework::GoogleTest {
-                    config_mode,
-                    inline_main_var,
-                    inline_main_body,
-                    discover_mode,
-                } => {
-                    // find_package(GTest ...)
-                    write!(&mut out, "find_package(GTest")?;
-                    if *config_mode {
-                        write!(&mut out, " CONFIG")?;
-                    }
-                    writeln!(&mut out, " REQUIRED)")?;
-
-                    // Inline gtest main
-                    write!(&mut out, "set(")?;
-                    emit_val(&mut out, Value::Raw(inline_main_var.clone()))?;
-                    write!(&mut out, " ")?;
-                    emit_val(
-                        &mut out,
-                        Value::Raw("${CMAKE_CURRENT_BINARY_DIR}/_gtest_main.cpp".into()),
-                    )?;
-                    writeln!(&mut out, ")")?;
-
-                    write!(&mut out, "file(WRITE ")?;
-                    emit_val(&mut out, Value::Raw(format!("${{{}}}", inline_main_var)))?;
-                    write!(&mut out, " ")?;
-                    emit_val(&mut out, Value::Bracket(inline_main_body.clone()))?;
-                    writeln!(&mut out, ")")?;
-
-                    // Aggregate phony target
-                    writeln!(&mut out, "add_custom_target({})", ts.aggregate_target)?;
-
-                    // Only include once
-                    writeln!(&mut out, "include(GoogleTest)")?;
-
-                    // Each entry becomes an executable + discover + dependency
-                    for e in &ts.entries {
-                        // add_executable
-                        write!(&mut out, "add_executable({}", e.exe_name)?;
-                        for s in &e.sources {
-                            write!(&mut out, " ")?;
-                            emit_val(&mut out, s.clone())?;
-                        }
-                        writeln!(&mut out, ")")?;
-
-                        // target_link_libraries
-                        if !e.link.is_empty() {
-                            write!(&mut out, "target_link_libraries({} PRIVATE", e.exe_name)?;
-                            for l in &e.link {
-                                write!(&mut out, " ")?;
-                                emit_val(&mut out, l.clone())?;
-                            }
-                            writeln!(&mut out, ")")?;
-                        }
-
-                        // cxx_std_N via target_compile_features
-                        if let Some(std) = e.cxx_standard {
-                            writeln!(
-                                &mut out,
-                                "target_compile_features({} PRIVATE cxx_std_{})",
-                                e.exe_name, std
-                            )?;
-                        }
-
-                        // gtest_discover_tests
-                        write!(&mut out, "gtest_discover_tests({}", e.exe_name)?;
-                        if !e.prefix.is_empty() {
-                            write!(&mut out, " TEST_PREFIX ")?;
-                            emit_val(&mut out, Value::Str(e.prefix.clone()))?;
-                        }
-                        write!(
-                            &mut out,
-                            " DISCOVERY_MODE {}",
-                            match discover_mode {
-                                DiscoverMode::PreTest => "PRE_TEST",
-                                DiscoverMode::PostBuild => "POST_BUILD",
-                            }
-                        )?;
-                        writeln!(&mut out, ")")?;
-
-                        // add_dependencies(aggregate exe)
-                        writeln!(
-                            &mut out,
-                            "add_dependencies({} {})",
-                            ts.aggregate_target, e.exe_name
-                        )?;
-                        writeln!(&mut out)?;
-                    }
-                }
-            }
-        }
-
-        Ok(out)
-    }
+    project.emit()
 }
 
-/* ----------------- helpers (internal) ----------------- */
+const GTEST_MAIN_BODY: &str = r#"
+#include <gtest/gtest.h>
+int main(int argc, char** argv) {
+  ::testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+}
+"#;
 
-fn emit_scoped_list(
-    out: &mut String,
-    cmd: &str,
-    target: &str,
-    list: &ScopedList,
-) -> anyhow::Result<()> {
-    let empty = list.privs.is_empty() && list.pubs.is_empty() && list.ifcs.is_empty();
-    if empty {
-        return Ok(());
-    }
+const SOURCE_EXTENSIONS: [&str; 4] = ["c", "cpp", "cxx", "cc"];
 
-    writeln!(out, "{}({}", cmd, target)?;
-    if !list.privs.is_empty() {
-        writeln!(out, "    PRIVATE")?;
-        for v in &list.privs {
-            write!(out, "        ")?;
-            emit_val(out, v.clone())?;
-            writeln!(out)?;
-        }
-    }
-    if !list.pubs.is_empty() {
-        writeln!(out, "    PUBLIC")?;
-        for v in &list.pubs {
-            write!(out, "        ")?;
-            emit_val(out, v.clone())?;
-            writeln!(out)?;
-        }
-    }
-    if !list.ifcs.is_empty() {
-        writeln!(out, "    INTERFACE")?;
-        for v in &list.ifcs {
-            write!(out, "        ")?;
-            emit_val(out, v.clone())?;
-            writeln!(out)?;
-        }
-    }
-    writeln!(out, ")")?;
-    Ok(())
+/// Wrap a project-root-relative path as `${CMAKE_CURRENT_LIST_DIR}/../<path>`.
+///
+/// The generated CMakeLists.txt lives inside the cache/build directory, so all
+/// references to project files need this prefix to resolve correctly.
+fn cmake_list_dir_value(path: &str) -> Value {
+    Value::Raw(format!("${{CMAKE_CURRENT_LIST_DIR}}/../{path}"))
 }
 
-fn emit_val(out: &mut String, v: Value) -> anyhow::Result<()> {
-    match v {
-        Value::Str(s) => {
-            write!(out, "{}", q(&s))?;
-        }
-        Value::Raw(s) => {
-            write!(out, "{}", s)?;
-        }
-        Value::List(xs) => {
-            // ;-joined list; escape semicolons in strings
-            let mut first = true;
-            for x in xs {
-                if !first {
-                    write!(out, ";")?;
-                }
-                match x {
-                    Value::Str(s) => write!(out, "{}", s.replace(';', "\\;"))?,
-                    Value::Raw(s) => write!(out, "{}", s)?,
-                    Value::List(_) => {
-                        anyhow::bail!("nested lists are not supported in Value::List")
-                    }
-                    Value::Bracket(_) => {
-                        anyhow::bail!("bracket args are only valid as standalone payloads")
-                    }
-                }
-                first = false;
-            }
-        }
-        Value::Bracket(body) => {
-            // raw multi-line block using [=[ ... ]=]
-            write!(out, "[=[\n{}]=]", body)?;
-        }
-    }
-    Ok(())
+/// Walk a directory tree and return paths (relative to CWD) of files whose
+/// extension matches one of `exts`. Returns an empty vec if the directory
+/// does not exist or is unreadable.
+fn find_files(root: &str, exts: &[&str]) -> Vec<String> {
+    WalkDir::new(root)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .filter(|e| {
+            e.path()
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| exts.contains(&ext))
+                .unwrap_or(false)
+        })
+        .map(|e| e.into_path().to_string_lossy().into_owned())
+        .collect()
 }
 
-fn q(s: &str) -> String {
-    // quote only if necessary; escape " and \
-    let needs = s
-        .chars()
-        .any(|c| c.is_whitespace() || matches!(c, ';' | '#' | '(' | ')' | '"'));
-    if !needs {
-        return s.to_string();
-    }
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
+fn sanitize_to_c_identifier(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
     for ch in s.chars() {
-        match ch {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            _ => out.push(ch),
-        }
+        out.push(if ch.is_alphanumeric() || ch == '_' {
+            ch
+        } else {
+            '_'
+        });
     }
-    out.push('"');
+    if out
+        .chars()
+        .next()
+        .map(|c| c.is_ascii_digit())
+        .unwrap_or(false)
+    {
+        out.insert(0, '_');
+    }
     out
 }
 
-impl Default for Project {
-    fn default() -> Self {
-        Self {
-            name: Default::default(),
-            version: Some("0.1.0".to_string()),
-            cmake_min: "3.21".to_string(),
-            languages: vec!["CXX"],
-            language_standard: 20,
-            targets: Default::default(),
-            packages: Default::default(),
-            settings: Default::default(),
-            tests: Default::default(),
-            includes: Default::default(),
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        cmake::CppStandard,
+        config::{CMakeConfig, ConanConfig, Config, TestingConfig},
+    };
+
+    fn test_config(name: &str, standard: CppStandard, tests_enabled: bool) -> Config {
+        Config {
+            project: crate::config::Project {
+                name: name.to_string(),
+                dependencies: vec![],
+                cache_dir: "build".to_string(),
+            },
+            cmake: CMakeConfig {
+                standard,
+                export_compile_commands: true,
+                silent: false,
+            },
+            conan: ConanConfig::default(),
+            testing: TestingConfig {
+                enabled: tests_enabled,
+                link: false,
+                dir: "tests".to_string(),
+            },
         }
+    }
+
+    #[test]
+    fn test_generate_basic_project() {
+        let config = test_config("MyProject", CppStandard::Cpp20, false);
+        let output = generate_cmakelists(&config).unwrap();
+
+        assert!(output.contains("cmake_minimum_required(VERSION 3.21)"));
+        assert!(output.contains("project(MyProject LANGUAGES CXX)"));
+        assert!(output.contains("set(CMAKE_CXX_STANDARD 20)"));
+        assert!(output.contains("set(CMAKE_CXX_STANDARD_REQUIRED ON)"));
+        assert!(output.contains("set(CMAKE_EXPORT_COMPILE_COMMANDS ON)"));
+        assert!(output.contains("include(${CMAKE_BINARY_DIR}/conandeps_legacy.cmake)"));
+        assert!(output.contains("add_library(libMyProject STATIC)"));
+        assert!(output.contains("add_executable(MyProject"));
+        assert!(output.contains("${CMAKE_CURRENT_LIST_DIR}/../src/main.cpp"));
+
+        // No test section when tests are disabled
+        assert!(!output.contains("include(CTest)"));
+        assert!(!output.contains("enable_testing()"));
+    }
+
+    #[test]
+    fn test_generate_with_cpp17_and_no_export() {
+        let mut config = test_config("NoDepsProject", CppStandard::Cpp17, false);
+        config.cmake.export_compile_commands = false;
+        let output = generate_cmakelists(&config).unwrap();
+
+        assert!(output.contains("set(CMAKE_CXX_STANDARD 17)"));
+        assert!(output.contains("set(CMAKE_EXPORT_COMPILE_COMMANDS OFF)"));
+        assert!(output.contains("project(NoDepsProject LANGUAGES CXX)"));
+    }
+
+    #[test]
+    fn test_generate_with_tests_enabled() {
+        let config = test_config("TestProject", CppStandard::Cpp20, true);
+        let output = generate_cmakelists(&config).unwrap();
+
+        assert!(output.contains("include(CTest)"));
+        assert!(output.contains("enable_testing()"));
+        assert!(output.contains("find_package(GTest CONFIG REQUIRED)"));
+        assert!(output.contains("include(GoogleTest)"));
+        assert!(output.contains("add_custom_target(TestProject_tests)"));
+        assert!(output.contains("C3PG_GTEST_MAIN"));
+    }
+
+    #[test]
+    fn test_sanitize_to_c_identifier() {
+        assert_eq!(sanitize_to_c_identifier("test_math"), "test_math");
+        assert_eq!(sanitize_to_c_identifier("test-utils"), "test_utils");
+        assert_eq!(sanitize_to_c_identifier("3test"), "_3test");
+        assert_eq!(sanitize_to_c_identifier("hello world"), "hello_world");
     }
 }

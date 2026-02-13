@@ -8,6 +8,7 @@ use std::{
 
 use crate::{
     cli::TestArgs,
+    cmake_gen,
     traits::{FromFile, ToFile},
 };
 use crate::{
@@ -48,7 +49,11 @@ int main() {
     // 3. Write minimal config files
     config.project.name = sandbox_name.to_string();
     config.cmake.standard = standard;
-    CMake::from_config(&config).to_file(cache_dir.join("CMakeLists.txt"))?;
+    fs::write(
+        cache_dir.join("CMakeLists.txt"),
+        cmake_gen::generate_cmakelists(&config)?,
+    )
+    .context("Could not write CMakeLists.txt")?;
     Conan::from_config(&runner, &config)?.to_file(cache_dir.join("conanfile.py"))?;
     find_and_add_dependency(runner, "gtest", &mut config)?;
     config.to_file(project_path.join("c3pg.toml"))?;
@@ -91,7 +96,8 @@ pub fn cmd_remove(runner: impl CommandRunner, expr: &str) -> Result<()> {
     let conanfile_path = cache_dir.join("conanfile.py");
     let cmake_path = cache_dir.join("CMakeLists.txt");
     Conan::from_config(&runner, &config)?.to_file(conanfile_path)?;
-    CMake::from_config(&config).to_file(cmake_path)?;
+    fs::write(&cmake_path, cmake_gen::generate_cmakelists(&config)?)
+        .context("Could not write CMakeLists.txt")?;
     config.to_file("c3pg.toml")?;
 
     if len_before == len_after {
@@ -202,9 +208,8 @@ pub fn find_and_add_dependency(
     Conan::from_config(&runner, config)?
         .to_file(conanfile_path)
         .with_context(|| "Could not write conan config")?;
-    CMake::from_config(config)
-        .to_file(cmake_path)
-        .with_context(|| "Could not write CMake config")?;
+    fs::write(&cmake_path, cmake_gen::generate_cmakelists(config)?)
+        .with_context(|| "Could not write CMakeLists.txt")?;
 
     info!("Added dependency '{}'", dependency);
     Ok(())
@@ -240,10 +245,10 @@ fn build_config(runner: impl CommandRunner) -> Result<Config> {
     if cmake_path.exists() {
         let cmake_modified = fs::metadata(&cmake_path)?.modified()?;
         if cmake_modified < config_modified {
-            CMake::from_config(&config).to_file(&cmake_path)?;
+            fs::write(&cmake_path, cmake_gen::generate_cmakelists(&config)?)?;
         }
     } else {
-        CMake::from_config(&config).to_file(&cmake_path)?;
+        fs::write(&cmake_path, cmake_gen::generate_cmakelists(&config)?)?;
     }
 
     Ok(config)

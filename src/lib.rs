@@ -1,5 +1,6 @@
 pub mod cli;
 pub mod cmake;
+pub mod cmake_core;
 pub mod cmake_gen;
 pub mod command_runner;
 pub mod commands;

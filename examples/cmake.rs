@@ -1,8 +1,11 @@
-use c3pg::cmake_gen::{DiscoverMode, LibType, Package, Project, Scope::*, Target, TestEntry, TestFramework, TestSuite, Value::*};
+use c3pg::cmake_core::{
+    DiscoverMode, LibType, Package, Project, Scope::*, Target, TestEntry, TestFramework, TestSuite,
+    Value::*,
+};
 
 fn main() {
     // You collect sources yourself (no globs).
-    let lib_sources = vec![Str("src/foo.cpp".into()), Str("src/bar.cpp".into())];
+    let lib_sources = vec!["src/foo.cpp".into(), "src/bar.cpp".into()];
     let app_main = Str("src/main.cpp".into());
 
     // Library + app
@@ -66,9 +69,9 @@ int main(int argc, char** argv) {
         .target(lib)
         .target(app)
         .with_tests(suite)
-        .emit();
+        .emit().unwrap();
 
-    std::fs::write("CMakeLists.txt", txt.unwrap()).unwrap();
+    println!("{txt}");
 }
 
 fn sanitize_to_c_identifier(s: &str) -> String {

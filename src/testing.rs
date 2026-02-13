@@ -108,9 +108,18 @@ pub fn testing_run(
         filter.unwrap_or_default(),
         jobs.unwrap_or(1)
     );
+    let mut args = vec!["--test-dir", "build", "--output-on-failure"];
+    if let Some(f) = filter {
+        args.extend(["-R", f]);
+    }
+    let jobs_str;
+    if let Some(j) = jobs {
+        jobs_str = j.to_string();
+        args.extend(["-j", jobs_str.as_str()]);
+    }
     runner
         .command("ctest")
-        .args(["ctest", "--test-dir", "build", "--output-on-failure", "-j"])
+        .args(args)
         .stream_mode(binary_stream_mode(lvl))
         .run()?;
     Ok(())
