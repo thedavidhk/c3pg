@@ -387,7 +387,7 @@ fn test_run_builds_then_executes_binary() {
     runner.on_success("build/runtest", &[], "Hello from C3PG!");
 
     with_cwd(tmp.path(), || {
-        cmd_run(&runner, BuildType::Debug, LevelFilter::Info, &Sanitizers::default()).unwrap();
+        cmd_run(&runner, BuildType::Debug, LevelFilter::Info, &Sanitizers::default(), None).unwrap();
     });
 
     // Build commands should have run
@@ -732,4 +732,109 @@ fn test_lint_fix_mode() {
     });
 
     runner.assert_ran("clang-tidy", &["-p=build", "--fix"]);
+}
+
+// ---------------------------------------------------------------------------
+// Multi-target tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_multitarget_build_invokes_cmake() {
+    let (tmp, _) = setup_multitarget_project("multitest");
+    let runner = mock_with_conan_responses();
+
+    with_cwd(tmp.path(), || {
+        cmd_build(&runner, BuildType::Debug, LevelFilter::Info, &Sanitizers::default()).unwrap();
+    });
+
+    // Should have invoked conan install and cmake build
+    runner.assert_ran("conan", &["install"]);
+    runner.assert_ran("cmake", &["--build"]);
+}
+
+#[test]
+fn test_multitarget_generates_correct_cmake() {
+    let (tmp, _) = setup_multitarget_project("cmakecheck");
+    let runner = mock_with_conan_responses();
+
+    with_cwd(tmp.path(), || {
+        // build_config regenerates CMakeLists.txt
+        cmd_build(&runner, BuildType::Debug, LevelFilter::Info, &Sanitizers::default()).unwrap();
+    });
+
+    let cmake = fs::read_to_string(tmp.path().join("build/CMakeLists.txt")).unwrap();
+    assert!(cmake.contains("add_library(mylib STATIC"), "Expected mylib library:\n{cmake}");
+    assert!(cmake.contains("add_executable(myapp"), "Expected myapp executable:\n{cmake}");
+    assert!(cmake.contains("add_executable(mytool"), "Expected mytool executable:\n{cmake}");
+}
+
+#[test]
+fn test_multitarget_run_requires_target() {
+    let (tmp, _) = setup_multitarget_project("runmulti");
+    let runner = mock_with_conan_responses();
+
+    let result = with_cwd(tmp.path(), || {
+        cmd_run(&runner, BuildType::Debug, LevelFilter::Info, &Sanitizers::default(), None)
+    });
+
+    assert!(result.is_err(), "cmd_run without --target should fail with multiple executables");
+    let err_msg = format!("{}", result.unwrap_err());
+    assert!(
+        err_msg.contains("multiple") || err_msg.contains("--target"),
+        "Error should mention multiple targets, got: {err_msg}"
+    );
+}
+
+#[test]
+fn test_multitarget_run_with_target() {
+    let (tmp, _) = setup_multitarget_project("runtarget");
+    let runner = mock_with_conan_responses();
+    runner.on_success("build/myapp", &[], "Hello!");
+
+    with_cwd(tmp.path(), || {
+        cmd_run(
+            &runner,
+            BuildType::Debug,
+            LevelFilter::Info,
+            &Sanitizers::default(),
+            Some("myapp"),
+        )
+        .unwrap();
+    });
+
+    runner.assert_ran("build/myapp", &[]);
+}
+
+#[test]
+fn test_multitarget_run_with_wrong_target() {
+    let (tmp, _) = setup_multitarget_project("runwrong");
+    let runner = mock_with_conan_responses();
+
+    let result = with_cwd(tmp.path(), || {
+        cmd_run(
+            &runner,
+            BuildType::Debug,
+            LevelFilter::Info,
+            &Sanitizers::default(),
+            Some("nonexistent"),
+        )
+    });
+
+    assert!(result.is_err());
+    let err_msg = format!("{}", result.unwrap_err());
+    assert!(
+        err_msg.contains("nonexistent"),
+        "Error should mention the bad target name, got: {err_msg}"
+    );
+}
+
+#[test]
+fn test_multitarget_config_roundtrips() {
+    // Write a config with targets, read it back, verify.
+    let (tmp, original) = setup_multitarget_project("roundtrip");
+    let readback = read_config(tmp.path());
+    assert_eq!(readback.targets.len(), original.targets.len());
+    assert_eq!(readback.targets[0].name, "mylib");
+    assert_eq!(readback.targets[1].name, "myapp");
+    assert_eq!(readback.targets[2].name, "mytool");
 }

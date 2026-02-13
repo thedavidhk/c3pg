@@ -321,6 +321,13 @@ mod tests {
                 }],
                 cache_dir: "build".to_string(),
             },
+            targets: vec![crate::config::TargetConfig {
+                name: "TestProject".to_string(),
+                target_type: crate::config::TargetType::Executable,
+                sources: vec!["src/main.cpp".to_string()],
+                public_include: vec![],
+                link: vec![],
+            }],
             cmake: crate::config::CMakeConfig::default(),
             conan: crate::config::ConanConfig::default(),
             testing: crate::config::TestingConfig::default(),

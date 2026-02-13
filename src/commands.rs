@@ -19,7 +19,7 @@ use crate::{
     conan::{self, Conan},
 };
 use crate::{
-    config::Config,
+    config::{Config, TargetConfig, TargetType},
     testing::{testing_add, testing_run},
     ui,
 };
@@ -58,6 +58,13 @@ fn scaffold_project(
 
     config.project.name = name.to_string();
     config.cmake.standard = standard;
+    config.targets = vec![TargetConfig {
+        name: name.to_string(),
+        target_type: TargetType::Executable,
+        sources: vec!["src/main.cpp".to_string()],
+        public_include: vec![],
+        link: vec![],
+    }];
     write_build_files(runner, &config, &cache_dir)?;
     config.to_file(project_path.join("c3pg.toml"))?;
 
@@ -243,27 +250,32 @@ fn cmd_build_inner(
 /// Run the current sandbox project.
 ///
 /// If the binary does not exist or is out of date, rebuilds first, then runs.
+/// When the project declares multiple executable targets, `target` selects
+/// which one to run. With a single executable (or no explicit targets) the
+/// `target` argument is optional.
 ///
 /// # Errors
 ///
-/// Returns an error if the build step fails or the compiled binary cannot
-/// be executed.
+/// Returns an error if the build step fails, no executable target can be
+/// determined, or the compiled binary cannot be executed.
 pub fn cmd_run(
     runner: impl CommandRunner,
     build_type: BuildType,
     lvl: LevelFilter,
     sanitizers: &Sanitizers,
+    target: Option<&str>,
 ) -> Result<()> {
     sanitizers.validate()?;
-    // Load config once; cmd_build_with_config avoids a second load.
     let config = build_config(&runner)?;
     cmd_build_inner(&runner, &config, build_type, lvl, sanitizers)?;
 
+    let exe_name = resolve_run_target(&config, target)?;
+
     let cache_dir = PathBuf::from(&config.project.cache_dir);
     let binary_name = if cfg!(target_os = "windows") {
-        format!("{}.exe", config.project.name)
+        format!("{exe_name}.exe")
     } else {
-        config.project.name.clone()
+        exe_name
     };
 
     let binary_path = cache_dir.join(binary_name);
@@ -276,6 +288,41 @@ pub fn cmd_run(
         )?;
 
     Ok(())
+}
+
+/// Determine which executable target to run.
+///
+/// When `target` is `Some`, it must name an executable target.
+/// When `target` is `None` and there is exactly one executable, use it.
+/// With multiple executables and no `--target`, return an error listing
+/// the available choices.
+fn resolve_run_target(config: &Config, target: Option<&str>) -> Result<String> {
+    let exe_targets: Vec<&str> = config
+        .targets
+        .iter()
+        .filter(|t| t.target_type == TargetType::Executable)
+        .map(|t| t.name.as_str())
+        .collect();
+
+    if let Some(name) = target {
+        if exe_targets.contains(&name) {
+            return Ok(name.to_string());
+        }
+        bail!(
+            "target '{}' is not an executable target\navailable executables: {}",
+            name,
+            exe_targets.join(", ")
+        );
+    }
+
+    match exe_targets.len() {
+        0 => bail!("no executable targets found in c3pg.toml"),
+        1 => Ok(exe_targets[0].to_string()),
+        _ => bail!(
+            "multiple executable targets found; use --target to choose one:\n  {}",
+            exe_targets.join("\n  ")
+        ),
+    }
 }
 
 /// Run or manage the project's test suite.

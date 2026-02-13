@@ -96,6 +96,9 @@ pub enum Commands {
         /// Build in release mode (default: debug)
         #[arg(long, short)]
         release: bool,
+        /// Which executable target to run (required when multiple exist)
+        #[arg(long)]
+        target: Option<String>,
         #[command(flatten)]
         sanitizers: Sanitizers,
     },
