@@ -7,6 +7,7 @@ use std::{fmt, str::FromStr, sync::OnceLock};
 pub struct Dependency {
     pub name: String,
     pub version: Option<String>,
+    pub user: Option<String>,
     pub channel: Option<String>,
 }
 
@@ -15,6 +16,7 @@ impl Dependency {
     pub fn matches(&self, other: &Dependency) -> bool {
         self.name == other.name
             && (self.version.is_none() || other.version.is_none() || self.version == other.version)
+            && (self.user.is_none() || other.user.is_none() || self.user == other.user)
             && (self.channel.is_none() || other.channel.is_none() || self.channel == other.channel)
     }
 }
@@ -24,7 +26,7 @@ impl FromStr for Dependency {
         static RE: OnceLock<Regex> = OnceLock::new();
         let re = RE.get_or_init(|| {
             Regex::new(
-                r"^\s*(?P<name>[^/]+)(?:/(?P<version>[^@#:]+))?(?:@(?P<channel>[^#:]+))?(?::|#)?.*$",
+                r"^\s*(?P<name>[^/]+)(?:/(?P<version>[^@#:]+))?(?:@(?P<user>[^/#:]+)(?:/(?P<channel>[^#:]+))?)?(?::|#)?.*$",
             )
             .expect("Could not create regex (this should not happen).")
         });
@@ -38,11 +40,13 @@ impl FromStr for Dependency {
             .to_string();
 
         let version = captures.name("version").map(|val| val.as_str().to_string());
+        let user = captures.name("user").map(|val| val.as_str().to_string());
         let channel = captures.name("channel").map(|val| val.as_str().to_string());
 
         Ok(Self {
             name,
             version,
+            user,
             channel,
         })
     }
@@ -56,8 +60,11 @@ impl fmt::Display for Dependency {
         if let Some(version) = &self.version {
             write!(f, "/{version}")?;
         }
-        if let Some(channel) = &self.channel {
-            write!(f, "@{channel}")?;
+        if let Some(user) = &self.user {
+            write!(f, "@{user}")?;
+            if let Some(channel) = &self.channel {
+                write!(f, "/{channel}")?;
+            }
         }
         Ok(())
     }

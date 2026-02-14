@@ -7,6 +7,7 @@ use std::sync::Mutex;
 
 use c3pg::cli::{TestArgs, TestOnlySubcmds};
 use c3pg::cmake::{BuildType, CppStandard, Sanitizers};
+use c3pg::config::DependencyValue;
 use c3pg::commands::*;
 use c3pg::test_utils::MockCommandRunner;
 use c3pg::traits::FromFile;
@@ -100,9 +101,9 @@ fn test_new_has_no_gtest_dependency() {
     // Config should NOT contain gtest (it's added lazily via `test add`)
     let config = c3pg::config::Config::from_file(root.join("c3pg.toml")).unwrap();
     assert!(
-        !config.project.dependencies.iter().any(|d| d.name == "gtest"),
+        !config.has_dependency("gtest"),
         "Expected no gtest in dependencies for a fresh project, got: {:?}",
-        config.project.dependencies
+        config.dependencies
     );
 
     // conanfile.py should not have a gtest requires line
@@ -226,9 +227,9 @@ fn test_add_dependency() {
     // Config should now contain fmt
     let config = read_config(tmp.path());
     assert!(
-        config.project.dependencies.iter().any(|d| d.name == "fmt"),
+        config.has_dependency("fmt"),
         "Expected fmt in dependencies, got: {:?}",
-        config.project.dependencies
+        config.dependencies
     );
 
     // conanfile.py should reference fmt
@@ -258,8 +259,10 @@ fn test_add_dependency_replaces_existing() {
     });
 
     let config1 = read_config(tmp.path());
-    let fmt_dep = config1.project.dependencies.iter().find(|d| d.name == "fmt").unwrap();
-    assert_eq!(fmt_dep.version.as_deref(), Some("11.0.0"));
+    assert_eq!(
+        config1.dependencies["fmt"],
+        DependencyValue::Simple("11.0.0".to_string())
+    );
 
     // Second add with a mock that returns a different set of versions.
     // Use a fresh mock so the fmt search override takes precedence.
@@ -271,12 +274,16 @@ fn test_add_dependency_replaces_existing() {
     });
 
     let config2 = read_config(tmp.path());
-    let fmt_dep2 = config2.project.dependencies.iter().find(|d| d.name == "fmt").unwrap();
-    assert_eq!(fmt_dep2.version.as_deref(), Some("10.2.0"));
+    assert_eq!(
+        config2.dependencies["fmt"],
+        DependencyValue::Simple("10.2.0".to_string())
+    );
 
-    // Should still only have one fmt entry, not two
-    let fmt_count = config2.project.dependencies.iter().filter(|d| d.name == "fmt").count();
-    assert_eq!(fmt_count, 1);
+    // Should still only have one fmt entry
+    assert_eq!(
+        config2.dependencies.keys().filter(|k| k.as_str() == "fmt").count(),
+        1
+    );
 }
 
 #[test]
@@ -291,7 +298,7 @@ fn test_remove_dependency() {
 
     // Verify it's there
     let config = read_config(tmp.path());
-    assert!(config.project.dependencies.iter().any(|d| d.name == "fmt"));
+    assert!(config.has_dependency("fmt"));
 
     // Now remove it
     let runner2 = mock_with_conan_responses();
@@ -302,9 +309,9 @@ fn test_remove_dependency() {
     // Should be gone from config
     let config2 = read_config(tmp.path());
     assert!(
-        !config2.project.dependencies.iter().any(|d| d.name == "fmt"),
+        !config2.has_dependency("fmt"),
         "fmt should have been removed, got: {:?}",
-        config2.project.dependencies
+        config2.dependencies
     );
 
     // conanfile.py should no longer mention fmt
@@ -429,9 +436,9 @@ fn test_test_add_creates_file() {
     // Gtest should have been lazily added to dependencies
     let config = read_config(tmp.path());
     assert!(
-        config.project.dependencies.iter().any(|d| d.name == "gtest"),
+        config.has_dependency("gtest"),
         "Expected gtest in dependencies after test add, got: {:?}",
-        config.project.dependencies
+        config.dependencies
     );
 }
 
