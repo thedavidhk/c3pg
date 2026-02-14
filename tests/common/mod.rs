@@ -1,4 +1,4 @@
-use c3pg::config::{Config, TargetConfig, TargetType};
+use c3pg::config::Config;
 use c3pg::test_utils::MockCommandRunner;
 use c3pg::traits::{FromFile, ToFile};
 use std::fs;
@@ -52,16 +52,9 @@ int main() {
     )
     .unwrap();
 
-    // Build a config with a default executable target
+    // Build a minimal config (convention mode: no explicit targets).
     let mut config = Config::default();
     config.project.name = name.to_string();
-    config.targets = vec![TargetConfig {
-        name: name.to_string(),
-        target_type: TargetType::Executable,
-        sources: vec!["src/main.cpp".to_string()],
-        public_include: vec![],
-        link: vec![],
-    }];
 
     // Write config
     config.to_file(root.join("c3pg.toml")).unwrap();
