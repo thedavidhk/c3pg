@@ -93,56 +93,85 @@ pub fn generate_cmakelists(config: &Config) -> Result<String> {
         project = project.target(cmake_target);
     }
 
-    // Auto-detect: emit test section when test source files exist.
-    let test_files = find_files(&config.testing.dir, &SOURCE_EXTENSIONS);
-    if !test_files.is_empty() {
-        let gtest = TestFramework::GoogleTest {
-            config_mode: true,
-            inline_main_var: "C3PG_GTEST_MAIN".into(),
-            inline_main_body: GTEST_MAIN_BODY.trim().into(),
-            discover_mode: DiscoverMode::PreTest,
-        };
-
-        let cxx_std: u16 = std_str.parse().unwrap_or(20);
-
-        let entries = test_files.iter().map(|path| {
-            let base = Path::new(path)
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("test");
-            let safe_name = sanitize_to_c_identifier(base);
-            // Link test entries to all library targets + gtest.
-            let mut link: Vec<Value> = lib_names
-                .iter()
-                .map(|n| Value::Str(n.clone()))
-                .collect();
-            if link.is_empty() {
-                // No libraries: link Conan deps directly.
-                link.push(Value::Raw("${CONANDEPS_LEGACY}".into()));
-            }
-            link.push(Value::Raw("gtest::gtest".into()));
-            TestEntry {
-                exe_name: safe_name.clone(),
-                sources: vec![
-                    project_root_value(&project_root_ref, path),
-                    Value::Raw("${C3PG_GTEST_MAIN}".into()),
-                ],
-                link,
-                prefix: format!("{base}."),
-                cxx_standard: Some(cxx_std),
-            }
-        });
-
-        let tests_target = format!("{project_name}_tests");
-        let suite = entries.fold(
-            TestSuite::new_aggregate(&tests_target, gtest),
-            super::cmake_core::TestSuite::with_entry,
-        );
-
+    if let Some(suite) = build_test_suite(config, &lib_names, &project_root_ref, &std_str) {
         project = project.with_tests(suite);
     }
 
     project.emit()
+}
+
+/// Build a `TestSuite` from test source files discovered on disk.
+///
+/// Returns `None` when no test files exist in the configured test directory.
+fn build_test_suite(
+    config: &Config,
+    lib_names: &[String],
+    project_root_ref: &str,
+    std_str: &str,
+) -> Option<TestSuite> {
+    let test_files = find_files(&config.testing.dir, &SOURCE_EXTENSIONS);
+    if test_files.is_empty() {
+        return None;
+    }
+
+    let gtest = TestFramework::GoogleTest {
+        config_mode: true,
+        inline_main_var: "C3PG_GTEST_MAIN".into(),
+        inline_main_body: GTEST_MAIN_BODY.trim().into(),
+        discover_mode: DiscoverMode::PreTest,
+    };
+
+    let cxx_std: u16 = std_str.parse().unwrap_or(20);
+
+    // In convention mode (no library targets), compile project sources
+    // (minus main.cpp) directly into each test binary so tests can
+    // access the project's code without a separate library target.
+    let convention_src_paths: Vec<String> = if lib_names.is_empty() {
+        find_files("src", &SOURCE_EXTENSIONS)
+            .into_iter()
+            .filter(|p| !p.ends_with("main.cpp"))
+            .collect()
+    } else {
+        vec![]
+    };
+
+    let entries = test_files.iter().map(|path| {
+        let base = Path::new(path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("test");
+        let safe_name = sanitize_to_c_identifier(base);
+        let mut link: Vec<Value> = lib_names
+            .iter()
+            .map(|n| Value::Str(n.clone()))
+            .collect();
+        if link.is_empty() {
+            link.push(Value::Raw("${CONANDEPS_LEGACY}".into()));
+        }
+        link.push(Value::Raw("gtest::gtest".into()));
+        let mut sources = vec![
+            project_root_value(project_root_ref, path),
+            Value::Raw("${C3PG_GTEST_MAIN}".into()),
+        ];
+        for p in &convention_src_paths {
+            sources.push(project_root_value(project_root_ref, p));
+        }
+        TestEntry {
+            exe_name: safe_name.clone(),
+            sources,
+            link,
+            prefix: format!("{base}."),
+            cxx_standard: Some(cxx_std),
+        }
+    });
+
+    let tests_target = format!("{}_tests", config.project.name);
+    let suite = entries.fold(
+        TestSuite::new_aggregate(&tests_target, gtest),
+        super::cmake_core::TestSuite::with_entry,
+    );
+
+    Some(suite)
 }
 
 const GTEST_MAIN_BODY: &str = r"
@@ -239,17 +268,42 @@ pub fn resolve_targets(targets: &[TargetConfig]) -> Result<Vec<EffectiveTarget>>
         .collect()
 }
 
-/// Resolve the config's `[[targets]]` into [`EffectiveTarget`]s.
+/// Convention-based target inference when no `[[targets]]` are declared.
+///
+/// All source files in `src/` are compiled into a single executable named
+/// after the project.  If no sources are found yet (e.g. during scaffolding),
+/// a conventional `src/main.cpp` entry is used as a placeholder.
+fn convention_targets(project_name: &str) -> Vec<EffectiveTarget> {
+    let all_sources = find_files("src", &SOURCE_EXTENSIONS);
+    let source_files = if all_sources.is_empty() {
+        vec!["src/main.cpp".to_string()]
+    } else {
+        all_sources
+    };
+    vec![EffectiveTarget {
+        name: project_name.to_string(),
+        target_type: TargetType::Executable,
+        source_files,
+        public_include: vec![],
+        link: vec![],
+    }]
+}
+
+/// Return the effective targets for a config.
+///
+/// When no `[[targets]]` are declared, convention-based inference is used
+/// (all sources in `src/` become a single executable).  When `[[targets]]`
+/// are present, they take full control.
 ///
 /// # Errors
 ///
-/// Returns an error if no targets are declared, or if validation / source
-/// resolution fails.
+/// Returns an error if explicit targets fail validation or source resolution.
 pub fn effective_targets(config: &Config) -> Result<Vec<EffectiveTarget>> {
     if config.targets.is_empty() {
-        anyhow::bail!("no [[targets]] declared in c3pg.toml");
+        Ok(convention_targets(&config.project.name))
+    } else {
+        resolve_targets(&config.targets)
     }
-    resolve_targets(&config.targets)
 }
 
 fn sanitize_to_c_identifier(s: &str) -> String {
@@ -286,13 +340,7 @@ mod tests {
                 dependencies: vec![],
                 cache_dir: "build".to_string(),
             },
-            targets: vec![crate::config::TargetConfig {
-                name: name.to_string(),
-                target_type: crate::config::TargetType::Executable,
-                sources: vec!["src/main.cpp".to_string()],
-                public_include: vec![],
-                link: vec![],
-            }],
+            targets: vec![],
             cmake: CMakeConfig {
                 standard,
                 export_compile_commands: true,

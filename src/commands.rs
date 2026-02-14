@@ -19,7 +19,7 @@ use crate::{
     conan::{self, Conan},
 };
 use crate::{
-    config::{Config, TargetConfig, TargetType},
+    config::{Config, TargetType},
     testing::{testing_add, testing_run},
     ui,
 };
@@ -58,13 +58,6 @@ fn scaffold_project(
 
     config.project.name = name.to_string();
     config.cmake.standard = standard;
-    config.targets = vec![TargetConfig {
-        name: name.to_string(),
-        target_type: TargetType::Executable,
-        sources: vec!["src/main.cpp".to_string()],
-        public_include: vec![],
-        link: vec![],
-    }];
     write_build_files(runner, &config, &cache_dir)?;
     config.to_file(project_path.join("c3pg.toml"))?;
 
@@ -292,11 +285,23 @@ pub fn cmd_run(
 
 /// Determine which executable target to run.
 ///
-/// When `target` is `Some`, it must name an executable target.
-/// When `target` is `None` and there is exactly one executable, use it.
-/// With multiple executables and no `--target`, return an error listing
-/// the available choices.
+/// In convention mode (no `[[targets]]`), the executable is the project name.
+/// With explicit targets: if `target` is `Some`, it must name an executable;
+/// if `None` and there is exactly one executable, use it; otherwise error.
 fn resolve_run_target(config: &Config, target: Option<&str>) -> Result<String> {
+    // Convention mode: no explicit targets, exe is project name.
+    if config.targets.is_empty() {
+        if let Some(name) = target {
+            if name != config.project.name {
+                bail!(
+                    "target '{name}' not found (convention target is '{}')",
+                    config.project.name
+                );
+            }
+        }
+        return Ok(config.project.name.clone());
+    }
+
     let exe_targets: Vec<&str> = config
         .targets
         .iter()
