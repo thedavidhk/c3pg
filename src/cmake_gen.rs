@@ -338,9 +338,9 @@ mod tests {
             project: crate::config::Project {
                 name: name.to_string(),
                 standard,
-                dependencies: vec![],
                 cache_dir: "build".to_string(),
             },
+            dependencies: std::collections::BTreeMap::new(),
             targets: vec![],
             cmake: CMakeConfig::default(),
             conan: ConanConfig::default(),
@@ -443,9 +443,9 @@ mod tests {
             project: crate::config::Project {
                 name: "multi".to_string(),
                 standard: CppStandard::Cpp20,
-                dependencies: vec![],
                 cache_dir: "build".to_string(),
             },
+            dependencies: std::collections::BTreeMap::new(),
             targets: vec![
                 crate::config::TargetConfig {
                     name: "mylib".into(),

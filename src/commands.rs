@@ -156,13 +156,8 @@ pub fn cmd_add(runner: impl CommandRunner, expr: &str) -> Result<()> {
 /// cannot be written, or the named dependency does not exist in the project.
 pub fn cmd_remove(runner: impl CommandRunner, expr: &str) -> Result<()> {
     let mut config = build_config(&runner)?;
-    let len_before = config.project.dependencies.len();
-    config
-        .project
-        .dependencies
-        .retain(|dep| dep.name.as_str() != expr);
 
-    if config.project.dependencies.len() == len_before {
+    if config.dependencies.remove(expr).is_none() {
         bail!(
             "Dependency {} not found in project. Not removing anything...",
             expr
@@ -345,12 +340,7 @@ pub fn cmd_test(runner: impl CommandRunner, args: TestArgs, lvl: LevelFilter) ->
     let mut config = build_config(&runner)?;
     if let Some(crate::cli::TestOnlySubcmds::Add { name }) = args.command {
         // Lazily add gtest on first test creation
-        if !config
-            .project
-            .dependencies
-            .iter()
-            .any(|d| d.name == "gtest")
-        {
+        if !config.has_dependency("gtest") {
             find_and_add_dependency(&runner, "gtest", &mut config, Path::new("."))?;
         }
         testing_add(&config.testing, &name)?;
@@ -416,7 +406,7 @@ pub fn find_and_add_dependency(
         .get_latest_matching_dependency(runner, expr)?
         .ok_or(anyhow!("Could not find dependency {} in remotes", expr))?;
 
-    config.project.add_dependency(dependency.clone());
+    config.add_dependency(&dependency);
 
     let cache_dir = project_root.join(&config.project.cache_dir);
     write_build_files(runner, config, &cache_dir)?;

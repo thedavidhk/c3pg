@@ -46,7 +46,7 @@ impl Conan {
                 .remote
                 .clone()
                 .unwrap_or(Self::get_first_remote(runner, "conan")?),
-            requirements: config.project.dependencies.clone(),
+            requirements: config.dependency_vec(),
             project_name: config.project.name.clone(),
         })
     }
@@ -305,28 +305,20 @@ fn conan_verbosity_args(lvl: LevelFilter) -> &'static [&'static str] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{cmake::BuildType, test_utils::MockCommandRunner};
+    use crate::{cmake::BuildType, config::DependencyValue, test_utils::MockCommandRunner};
 
     #[test]
     fn test_conan_from_config_with_remote_fallback() {
         let mock_runner =
             MockCommandRunner::new(Some("default_remote: https://example.com [Enabled]".to_string()));
 
-        let config = Config {
-            project: crate::config::Project {
-                name: "TestProject".to_string(),
-                standard: crate::cmake::CppStandard::default(),
-                dependencies: vec![Dependency {
-                    name: "TestDependency".to_string(),
-                    ..Default::default()
-                }],
-                cache_dir: "build".to_string(),
-            },
-            targets: vec![],
-            cmake: crate::config::CMakeConfig::default(),
-            conan: crate::config::ConanConfig::default(),
-            testing: crate::config::TestingConfig::default(),
-        };
+        let mut config = Config::default();
+        config.project.name = "TestProject".to_string();
+        config.add_dependency(&Dependency {
+            name: "TestDependency".to_string(),
+            version: Some("1.0".to_string()),
+            ..Default::default()
+        });
 
         let conan =
             Conan::from_config(&mock_runner, &config).expect("Failed to create Conan instance");
@@ -449,5 +441,44 @@ mod tests {
         assert!(formatted.contains("def requirements(self):"));
         assert!(formatted.contains("self.requires(\"Dep1\")"));
         assert!(formatted.contains("self.requires(\"Dep2\")"));
+    }
+
+    #[test]
+    fn test_conan_from_config_dependency_vec() {
+        let mock_runner =
+            MockCommandRunner::new(Some("myremote: https://example.com [Enabled]".to_string()));
+
+        let mut config = Config::default();
+        config.project.name = "myproj".to_string();
+        config.dependencies.insert(
+            "fmt".to_string(),
+            DependencyValue::Simple("11.0.0".to_string()),
+        );
+        config.dependencies.insert(
+            "mylib".to_string(),
+            DependencyValue::Detailed {
+                version: "1.0.0".to_string(),
+                user: Some("probe".to_string()),
+                channel: Some("release".to_string()),
+            },
+        );
+
+        let conan = Conan::from_config(&mock_runner, &config).unwrap();
+        assert_eq!(conan.requirements.len(), 2);
+
+        // BTreeMap is sorted alphabetically
+        assert_eq!(conan.requirements[0].name, "fmt");
+        assert_eq!(conan.requirements[0].version.as_deref(), Some("11.0.0"));
+        assert!(conan.requirements[0].user.is_none());
+
+        assert_eq!(conan.requirements[1].name, "mylib");
+        assert_eq!(conan.requirements[1].version.as_deref(), Some("1.0.0"));
+        assert_eq!(conan.requirements[1].user.as_deref(), Some("probe"));
+        assert_eq!(conan.requirements[1].channel.as_deref(), Some("release"));
+
+        // Display should produce correct Conan reference
+        let formatted = conan.to_string();
+        assert!(formatted.contains("self.requires(\"fmt/11.0.0\")"));
+        assert!(formatted.contains("self.requires(\"mylib/1.0.0@probe/release\")"));
     }
 }

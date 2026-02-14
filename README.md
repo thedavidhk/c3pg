@@ -15,7 +15,8 @@ code. The complexity still exists, but it stays under the hood.
   to declare.
 - **Unified Configuration**: Use `c3pg.toml` for all project configuration, similar to `Cargo.toml`
   in Rust.
-- **Dependency Management**: Easily add and remove Conan dependencies.
+- **Dependency Management**: Easily add and remove Conan dependencies with a Cargo-like
+  `[dependencies]` table.
 - **Build and Run**: Compile and execute your projects with minimal effort.
 - **Testing**: Scaffold and run GTest-based tests with auto-detection.
 - **Multi-target Support**: Declare library and executable targets explicitly when needed.
@@ -125,7 +126,7 @@ specify a version and/or a user/channel:
 
 ```bash
 c3pg add fmt/10.0.1
-c3pg add fmt/10.0.1@some_user/some_channel
+c3pg add mylib/1.0.0@myuser/stable
 ```
 
 #### `remove`
@@ -271,18 +272,27 @@ needs only a project name:
 ```toml
 [project]
 name = "my_project"
+standard = "Cpp20"
 ```
 
 All sources in `src/` are compiled into a single executable named after the project.
 This is the default when no `[[targets]]` section is present.
 
-#### With a dependency and non-default standard
+#### Dependencies
+
+Dependencies are declared in a `[dependencies]` table, similar to `Cargo.toml`. A
+simple dependency only needs a version string. For packages from a private Conan
+remote you can specify `user` and `channel` using inline-table syntax:
 
 ```toml
 [project]
 name = "my_project"
-standard = "Cpp17"
-dependencies = ["fmt/10.1.0"]
+standard = "Cpp20"
+
+[dependencies]
+fmt = "11.0.0"
+boost = "1.88"
+mylib = { version = "2.1.0", user = "team", channel = "stable" }
 ```
 
 #### Multi-target project (library + executables)
@@ -293,7 +303,9 @@ explicitly:
 ```toml
 [project]
 name = "my_project"
-dependencies = ["fmt/10.1.0"]
+
+[dependencies]
+fmt = "11.0.0"
 
 [[targets]]
 name = "mylib"
@@ -326,7 +338,9 @@ dir = "test"                      # default: "tests"
 
 ### Sections
 
-- **`[project]`**: Project name, C++ standard, dependencies, and build cache directory.
+- **`[project]`**: Project name, C++ standard, and build cache directory.
+- **`[dependencies]`** (optional): Conan packages with version strings or detailed
+  inline tables (`{ version, user, channel }`).
 - **`[[targets]]`** (optional): Explicit build targets with type, sources, include dirs, and
   inter-target linking. Omit for convention-based single-executable projects.
 - **`[cmake]`** (optional): CMake-specific settings.
