@@ -81,9 +81,9 @@ pub fn read_config(project_root: &Path) -> Config {
 /// - `include/` (empty, for public headers)
 /// - `build/CMakeLists.txt`
 /// - `build/conanfile.py`
-/// - `c3pg.toml` with `[[targets]]`
+/// - `c3pg.toml` with `[[lib]]` and `[[bin]]` sections
 pub fn setup_multitarget_project(name: &str) -> (TempDir, Config) {
-    use c3pg::config::{TargetConfig, TargetType};
+    use c3pg::config::{BinConfig, LibConfig};
 
     let tmp = TempDir::new().expect("failed to create temp dir");
     let root = tmp.path();
@@ -101,26 +101,21 @@ pub fn setup_multitarget_project(name: &str) -> (TempDir, Config) {
 
     let mut config = Config::default();
     config.project.name = name.to_string();
-    config.targets = vec![
-        TargetConfig {
-            name: "mylib".into(),
-            target_type: TargetType::StaticLibrary,
-            sources: vec!["src/lib".into()],
-            public_include: vec!["include".into()],
-            link: vec![],
-        },
-        TargetConfig {
+    config.lib = vec![LibConfig {
+        name: "mylib".into(),
+        sources: vec!["src/lib".into()],
+        public_include: vec!["include".into()],
+        link: vec![],
+    }];
+    config.bin = vec![
+        BinConfig {
             name: "myapp".into(),
-            target_type: TargetType::Executable,
             sources: vec!["src/main.cpp".into()],
-            public_include: vec![],
             link: vec!["mylib".into()],
         },
-        TargetConfig {
+        BinConfig {
             name: "mytool".into(),
-            target_type: TargetType::Executable,
             sources: vec!["src/tool".into()],
-            public_include: vec![],
             link: vec!["mylib".into()],
         },
     ];

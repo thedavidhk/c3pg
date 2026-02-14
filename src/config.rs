@@ -82,7 +82,9 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub dependencies: BTreeMap<String, DependencyValue>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub targets: Vec<TargetConfig>,
+    pub lib: Vec<LibConfig>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bin: Vec<BinConfig>,
     #[serde(default, skip_serializing_if = "CMakeConfig::is_default")]
     pub cmake: CMakeConfig,
     #[serde(default, skip_serializing_if = "ConanConfig::is_default")]
@@ -119,25 +121,33 @@ impl Config {
 // Target types
 // ---------------------------------------------------------------------------
 
-/// The kind of build artifact a target produces.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+/// The kind of build artifact a target produces (internal representation).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TargetType {
     Executable,
     StaticLibrary,
 }
 
-/// A target as declared in `[[targets]]` in `c3pg.toml`.
+/// A library target declared in `[[lib]]` in `c3pg.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub struct TargetConfig {
+pub struct LibConfig {
     pub name: String,
-    #[serde(rename = "type")]
-    pub target_type: TargetType,
     #[serde(default)]
     pub sources: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub public_include: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub link: Vec<String>,
+}
+
+/// An executable target declared in `[[bin]]` in `c3pg.toml`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct BinConfig {
+    pub name: String,
+    #[serde(default)]
+    pub sources: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub link: Vec<String>,
 }
@@ -153,51 +163,67 @@ pub struct EffectiveTarget {
     pub link: Vec<String>,
 }
 
-/// Validate the `[[targets]]` array from a config file.
+/// Validate the `[[lib]]` and `[[bin]]` arrays from a config file.
 ///
-/// Checks for duplicate names, dangling `link` references, and dependency
-/// cycles.
+/// Checks for duplicate names (across both lists), dangling `link` references
+/// (must point to a declared `[[lib]]`), and dependency cycles among libraries.
 ///
 /// # Errors
 ///
 /// Returns an error describing the first validation problem found.
-pub fn validate_targets(targets: &[TargetConfig]) -> Result<()> {
-    if targets.is_empty() {
+pub fn validate_targets(libs: &[LibConfig], bins: &[BinConfig]) -> Result<()> {
+    if libs.is_empty() && bins.is_empty() {
         return Ok(());
     }
 
-    // Duplicate names
+    // Duplicate names (across both lists)
     let mut seen = HashSet::new();
-    for t in targets {
-        if !seen.insert(&t.name) {
-            bail!("duplicate target name: '{}'", t.name);
+    for lib in libs {
+        if !seen.insert(&lib.name) {
+            bail!("duplicate target name: '{}'", lib.name);
+        }
+    }
+    for bin in bins {
+        if !seen.insert(&bin.name) {
+            bail!("duplicate target name: '{}'", bin.name);
         }
     }
 
-    // Dangling link references
-    let names: HashSet<&str> = targets.iter().map(|t| t.name.as_str()).collect();
-    for t in targets {
-        for link in &t.link {
-            if !names.contains(link.as_str()) {
+    // Link references must point to a declared library target
+    let lib_names: HashSet<&str> = libs.iter().map(|l| l.name.as_str()).collect();
+    for lib in libs {
+        for link in &lib.link {
+            if !lib_names.contains(link.as_str()) {
                 bail!(
-                    "target '{}' links to '{}', which is not a declared target",
-                    t.name,
+                    "library '{}' links to '{}', which is not a declared [[lib]] target",
+                    lib.name,
+                    link
+                );
+            }
+        }
+    }
+    for bin in bins {
+        for link in &bin.link {
+            if !lib_names.contains(link.as_str()) {
+                bail!(
+                    "executable '{}' links to '{}', which is not a declared [[lib]] target",
+                    bin.name,
                     link
                 );
             }
         }
     }
 
-    // Cycle detection via DFS
-    let adj: HashMap<&str, &[String]> = targets
+    // Cycle detection via DFS (only among library targets)
+    let adj: HashMap<&str, &[String]> = libs
         .iter()
-        .map(|t| (t.name.as_str(), t.link.as_slice()))
+        .map(|l| (l.name.as_str(), l.link.as_slice()))
         .collect();
 
     // 0 = unvisited, 1 = in-stack, 2 = done
-    let mut state: HashMap<&str, u8> = names.iter().map(|&n| (n, 0u8)).collect();
+    let mut state: HashMap<&str, u8> = lib_names.iter().map(|&n| (n, 0u8)).collect();
 
-    for &start in &names {
+    for &start in &lib_names {
         if state[start] == 0 {
             let mut stack = vec![(start, 0usize)]; // (node, edge index)
             state.insert(start, 1);
@@ -763,6 +789,8 @@ name = "simple"
 "#;
         let config: Config = toml::from_str(toml_data)?;
         assert_eq!(config.project.name, "simple");
+        assert!(config.lib.is_empty());
+        assert!(config.bin.is_empty());
         Ok(())
     }
 
@@ -775,31 +803,27 @@ name = "multi"
 [dependencies]
 fmt = "11.0.0"
 
-[[targets]]
+[[lib]]
 name = "mylib"
-type = "static-library"
 sources = ["src/lib"]
 public-include = ["include"]
 
-[[targets]]
+[[bin]]
 name = "myapp"
-type = "executable"
 sources = ["src/main.cpp"]
 link = ["mylib"]
 "#;
         let config: Config = toml::from_str(toml_data)?;
-        assert_eq!(config.targets.len(), 2);
-        assert_eq!(config.targets[0].name, "mylib");
-        assert_eq!(config.targets[0].target_type, TargetType::StaticLibrary);
-        assert_eq!(config.targets[0].sources, vec!["src/lib"]);
-        assert_eq!(config.targets[0].public_include, vec!["include"]);
-        assert!(config.targets[0].link.is_empty());
+        assert_eq!(config.lib.len(), 1);
+        assert_eq!(config.lib[0].name, "mylib");
+        assert_eq!(config.lib[0].sources, vec!["src/lib"]);
+        assert_eq!(config.lib[0].public_include, vec!["include"]);
+        assert!(config.lib[0].link.is_empty());
 
-        assert_eq!(config.targets[1].name, "myapp");
-        assert_eq!(config.targets[1].target_type, TargetType::Executable);
-        assert_eq!(config.targets[1].sources, vec!["src/main.cpp"]);
-        assert!(config.targets[1].public_include.is_empty());
-        assert_eq!(config.targets[1].link, vec!["mylib"]);
+        assert_eq!(config.bin.len(), 1);
+        assert_eq!(config.bin[0].name, "myapp");
+        assert_eq!(config.bin[0].sources, vec!["src/main.cpp"]);
+        assert_eq!(config.bin[0].link, vec!["mylib"]);
 
         // Check the dependency was loaded
         assert_eq!(config.dependencies.len(), 1);
@@ -812,8 +836,8 @@ link = ["mylib"]
         let config = Config::default();
         let serialized = toml::to_string_pretty(&config).unwrap();
         assert!(
-            !serialized.contains("targets"),
-            "Empty targets should not appear in serialized output"
+            !serialized.contains("[[lib]]") && !serialized.contains("[[bin]]"),
+            "Empty lib/bin should not appear in serialized output"
         );
     }
 
@@ -833,49 +857,39 @@ link = ["mylib"]
 
     #[test]
     fn test_validate_empty_targets_ok() {
-        assert!(validate_targets(&[]).is_ok());
+        assert!(validate_targets(&[], &[]).is_ok());
     }
 
     #[test]
     fn test_validate_valid_targets() {
-        let targets = vec![
-            TargetConfig {
-                name: "mylib".into(),
-                target_type: TargetType::StaticLibrary,
-                sources: vec!["src/lib".into()],
-                public_include: vec!["include".into()],
-                link: vec![],
-            },
-            TargetConfig {
-                name: "myapp".into(),
-                target_type: TargetType::Executable,
-                sources: vec!["src/main.cpp".into()],
-                public_include: vec![],
-                link: vec!["mylib".into()],
-            },
-        ];
-        assert!(validate_targets(&targets).is_ok());
+        let libs = vec![LibConfig {
+            name: "mylib".into(),
+            sources: vec!["src/lib".into()],
+            public_include: vec!["include".into()],
+            link: vec![],
+        }];
+        let bins = vec![BinConfig {
+            name: "myapp".into(),
+            sources: vec!["src/main.cpp".into()],
+            link: vec!["mylib".into()],
+        }];
+        assert!(validate_targets(&libs, &bins).is_ok());
     }
 
     #[test]
     fn test_validate_duplicate_names() {
-        let targets = vec![
-            TargetConfig {
-                name: "dup".into(),
-                target_type: TargetType::Executable,
-                sources: vec![],
-                public_include: vec![],
-                link: vec![],
-            },
-            TargetConfig {
-                name: "dup".into(),
-                target_type: TargetType::StaticLibrary,
-                sources: vec![],
-                public_include: vec![],
-                link: vec![],
-            },
-        ];
-        let err = validate_targets(&targets).unwrap_err();
+        let libs = vec![LibConfig {
+            name: "dup".into(),
+            sources: vec![],
+            public_include: vec![],
+            link: vec![],
+        }];
+        let bins = vec![BinConfig {
+            name: "dup".into(),
+            sources: vec![],
+            link: vec![],
+        }];
+        let err = validate_targets(&libs, &bins).unwrap_err();
         assert!(
             format!("{err}").contains("duplicate"),
             "Expected duplicate error, got: {err}"
@@ -884,14 +898,12 @@ link = ["mylib"]
 
     #[test]
     fn test_validate_dangling_link() {
-        let targets = vec![TargetConfig {
+        let bins = vec![BinConfig {
             name: "app".into(),
-            target_type: TargetType::Executable,
             sources: vec![],
-            public_include: vec![],
             link: vec!["nonexistent".into()],
         }];
-        let err = validate_targets(&targets).unwrap_err();
+        let err = validate_targets(&[], &bins).unwrap_err();
         assert!(
             format!("{err}").contains("nonexistent"),
             "Expected dangling link error, got: {err}"
@@ -900,23 +912,21 @@ link = ["mylib"]
 
     #[test]
     fn test_validate_cycle() {
-        let targets = vec![
-            TargetConfig {
+        let libs = vec![
+            LibConfig {
                 name: "a".into(),
-                target_type: TargetType::StaticLibrary,
                 sources: vec![],
                 public_include: vec![],
                 link: vec!["b".into()],
             },
-            TargetConfig {
+            LibConfig {
                 name: "b".into(),
-                target_type: TargetType::StaticLibrary,
                 sources: vec![],
                 public_include: vec![],
                 link: vec!["a".into()],
             },
         ];
-        let err = validate_targets(&targets).unwrap_err();
+        let err = validate_targets(&libs, &[]).unwrap_err();
         assert!(
             format!("{err}").contains("cycle"),
             "Expected cycle error, got: {err}"
@@ -925,14 +935,13 @@ link = ["mylib"]
 
     #[test]
     fn test_validate_self_link_is_cycle() {
-        let targets = vec![TargetConfig {
+        let libs = vec![LibConfig {
             name: "self".into(),
-            target_type: TargetType::StaticLibrary,
             sources: vec![],
             public_include: vec![],
             link: vec!["self".into()],
         }];
-        let err = validate_targets(&targets).unwrap_err();
+        let err = validate_targets(&libs, &[]).unwrap_err();
         assert!(
             format!("{err}").contains("cycle"),
             "Expected cycle error, got: {err}"

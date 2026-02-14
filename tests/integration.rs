@@ -840,8 +840,9 @@ fn test_multitarget_config_roundtrips() {
     // Write a config with targets, read it back, verify.
     let (tmp, original) = setup_multitarget_project("roundtrip");
     let readback = read_config(tmp.path());
-    assert_eq!(readback.targets.len(), original.targets.len());
-    assert_eq!(readback.targets[0].name, "mylib");
-    assert_eq!(readback.targets[1].name, "myapp");
-    assert_eq!(readback.targets[2].name, "mytool");
+    assert_eq!(readback.lib.len(), original.lib.len());
+    assert_eq!(readback.bin.len(), original.bin.len());
+    assert_eq!(readback.lib[0].name, "mylib");
+    assert_eq!(readback.bin[0].name, "myapp");
+    assert_eq!(readback.bin[1].name, "mytool");
 }
