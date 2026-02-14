@@ -19,7 +19,7 @@ code. The complexity still exists, but it stays under the hood.
   `[dependencies]` table.
 - **Build and Run**: Compile and execute your projects with minimal effort.
 - **Testing**: Scaffold and run GTest-based tests with auto-detection.
-- **Multi-target Support**: Declare library and executable targets explicitly when needed.
+- **Multi-target Support**: Declare `[[lib]]` and `[[bin]]` targets explicitly when needed.
 - **Code Quality**: Format and lint C++ sources with `clang-format` and `clang-tidy`.
 - **Sanitizers**: Enable AddressSanitizer, ThreadSanitizer, or UndefinedBehaviorSanitizer with a
   single flag.
@@ -276,7 +276,7 @@ standard = "Cpp20"
 ```
 
 All sources in `src/` are compiled into a single executable named after the project.
-This is the default when no `[[targets]]` section is present.
+This is the default when no `[[lib]]`/`[[bin]]` sections are present.
 
 #### Dependencies
 
@@ -297,8 +297,8 @@ mylib = { version = "2.1.0", user = "team", channel = "stable" }
 
 #### Multi-target project (library + executables)
 
-When you need library targets or multiple executables, add `[[targets]]` sections
-explicitly:
+When you need library targets or multiple executables, add `[[lib]]` and `[[bin]]`
+sections (similar to Cargo's `[[bin]]` / `[lib]`):
 
 ```toml
 [project]
@@ -307,15 +307,13 @@ name = "my_project"
 [dependencies]
 fmt = "11.0.0"
 
-[[targets]]
+[[lib]]
 name = "mylib"
-type = "static-library"
 sources = ["src/lib"]
 public-include = ["include"]
 
-[[targets]]
+[[bin]]
 name = "my_project"
-type = "executable"
 sources = ["src/main.cpp"]
 link = ["mylib"]
 ```
@@ -341,8 +339,10 @@ dir = "test"                      # default: "tests"
 - **`[project]`**: Project name, C++ standard, and build cache directory.
 - **`[dependencies]`** (optional): Conan packages with version strings or detailed
   inline tables (`{ version, user, channel }`).
-- **`[[targets]]`** (optional): Explicit build targets with type, sources, include dirs, and
-  inter-target linking. Omit for convention-based single-executable projects.
+- **`[[lib]]`** (optional): Library targets with sources, public include dirs, and
+  inter-library linking.
+- **`[[bin]]`** (optional): Executable targets with sources and library linking.
+  Omit both `[[lib]]` and `[[bin]]` for convention-based single-executable projects.
 - **`[cmake]`** (optional): CMake-specific settings.
 - **`[conan]`** (optional): Conan binary path and remote override.
 - **`[testing]`** (optional): Test source directory.

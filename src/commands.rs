@@ -19,7 +19,7 @@ use crate::{
     conan::{self, Conan},
 };
 use crate::{
-    config::{Config, TargetType},
+    config::Config,
     testing::{testing_add, testing_run},
     ui,
 };
@@ -280,12 +280,12 @@ pub fn cmd_run(
 
 /// Determine which executable target to run.
 ///
-/// In convention mode (no `[[targets]]`), the executable is the project name.
-/// With explicit targets: if `target` is `Some`, it must name an executable;
-/// if `None` and there is exactly one executable, use it; otherwise error.
+/// In convention mode (no `[[lib]]`/`[[bin]]`), the executable is the project
+/// name. With explicit targets: if `target` is `Some`, it must name a `[[bin]]`;
+/// if `None` and there is exactly one `[[bin]]`, use it; otherwise error.
 fn resolve_run_target(config: &Config, target: Option<&str>) -> Result<String> {
     // Convention mode: no explicit targets, exe is project name.
-    if config.targets.is_empty() {
+    if config.lib.is_empty() && config.bin.is_empty() {
         if let Some(name) = target {
             if name != config.project.name {
                 bail!(
@@ -297,30 +297,25 @@ fn resolve_run_target(config: &Config, target: Option<&str>) -> Result<String> {
         return Ok(config.project.name.clone());
     }
 
-    let exe_targets: Vec<&str> = config
-        .targets
-        .iter()
-        .filter(|t| t.target_type == TargetType::Executable)
-        .map(|t| t.name.as_str())
-        .collect();
+    let exe_names: Vec<&str> = config.bin.iter().map(|b| b.name.as_str()).collect();
 
     if let Some(name) = target {
-        if exe_targets.contains(&name) {
+        if exe_names.contains(&name) {
             return Ok(name.to_string());
         }
         bail!(
             "target '{}' is not an executable target\navailable executables: {}",
             name,
-            exe_targets.join(", ")
+            exe_names.join(", ")
         );
     }
 
-    match exe_targets.len() {
+    match exe_names.len() {
         0 => bail!("no executable targets found in c3pg.toml"),
-        1 => Ok(exe_targets[0].to_string()),
+        1 => Ok(exe_names[0].to_string()),
         _ => bail!(
             "multiple executable targets found; use --target to choose one:\n  {}",
-            exe_targets.join("\n  ")
+            exe_names.join("\n  ")
         ),
     }
 }

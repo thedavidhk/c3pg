@@ -6,7 +6,7 @@ use crate::{
         Scope::{PRIVATE, PUBLIC},
         Target, TestEntry, TestFramework, TestSuite, Value,
     },
-    config::{Config, EffectiveTarget, TargetConfig, TargetType},
+    config::{BinConfig, Config, EffectiveTarget, LibConfig, TargetType},
 };
 use anyhow::Result;
 use walkdir::WalkDir;
@@ -14,7 +14,7 @@ use walkdir::WalkDir;
 /// Generate a complete `CMakeLists.txt` string from the project configuration.
 ///
 /// Source files are discovered from the `src/` and test directories on disk.
-/// If `[[targets]]` are declared in the config they are used; otherwise the
+/// If `[[lib]]`/`[[bin]]` are declared in the config they are used; otherwise the
 /// current auto-detect convention (single exe + optional lib) is applied.
 ///
 /// # Errors
@@ -238,37 +238,58 @@ fn resolve_source_entry(entry: &str) -> Vec<String> {
     }
 }
 
-/// Resolve explicit `[[targets]]` into [`EffectiveTarget`]s by expanding
-/// directory entries to concrete source file paths.
+/// Resolve explicit `[[lib]]` and `[[bin]]` targets into [`EffectiveTarget`]s
+/// by expanding directory entries to concrete source file paths.
+///
+/// Libraries are emitted first so they are defined before executables that
+/// link to them.
 ///
 /// # Errors
 ///
 /// Returns an error if target validation fails (duplicate names, cycles, etc.).
-pub fn resolve_targets(targets: &[TargetConfig]) -> Result<Vec<EffectiveTarget>> {
-    crate::config::validate_targets(targets)?;
+pub fn resolve_targets(libs: &[LibConfig], bins: &[BinConfig]) -> Result<Vec<EffectiveTarget>> {
+    crate::config::validate_targets(libs, bins)?;
 
-    targets
-        .iter()
-        .map(|tc| {
-            let mut source_files: Vec<String> = tc
-                .sources
-                .iter()
-                .flat_map(|entry| resolve_source_entry(entry))
-                .collect();
-            source_files.sort();
-            source_files.dedup();
-            Ok(EffectiveTarget {
-                name: tc.name.clone(),
-                target_type: tc.target_type.clone(),
-                source_files,
-                public_include: tc.public_include.clone(),
-                link: tc.link.clone(),
-            })
-        })
-        .collect()
+    let mut targets = Vec::with_capacity(libs.len() + bins.len());
+
+    for lib in libs {
+        let mut source_files: Vec<String> = lib
+            .sources
+            .iter()
+            .flat_map(|entry| resolve_source_entry(entry))
+            .collect();
+        source_files.sort();
+        source_files.dedup();
+        targets.push(EffectiveTarget {
+            name: lib.name.clone(),
+            target_type: TargetType::StaticLibrary,
+            source_files,
+            public_include: lib.public_include.clone(),
+            link: lib.link.clone(),
+        });
+    }
+
+    for bin in bins {
+        let mut source_files: Vec<String> = bin
+            .sources
+            .iter()
+            .flat_map(|entry| resolve_source_entry(entry))
+            .collect();
+        source_files.sort();
+        source_files.dedup();
+        targets.push(EffectiveTarget {
+            name: bin.name.clone(),
+            target_type: TargetType::Executable,
+            source_files,
+            public_include: vec![],
+            link: bin.link.clone(),
+        });
+    }
+
+    Ok(targets)
 }
 
-/// Convention-based target inference when no `[[targets]]` are declared.
+/// Convention-based target inference when no `[[lib]]`/`[[bin]]` are declared.
 ///
 /// All source files in `src/` are compiled into a single executable named
 /// after the project.  If no sources are found yet (e.g. during scaffolding),
@@ -291,18 +312,18 @@ fn convention_targets(project_name: &str) -> Vec<EffectiveTarget> {
 
 /// Return the effective targets for a config.
 ///
-/// When no `[[targets]]` are declared, convention-based inference is used
-/// (all sources in `src/` become a single executable).  When `[[targets]]`
-/// are present, they take full control.
+/// When no `[[lib]]`/`[[bin]]` sections are declared, convention-based
+/// inference is used (all sources in `src/` become a single executable).
+/// When explicit targets are present, they take full control.
 ///
 /// # Errors
 ///
 /// Returns an error if explicit targets fail validation or source resolution.
 pub fn effective_targets(config: &Config) -> Result<Vec<EffectiveTarget>> {
-    if config.targets.is_empty() {
+    if config.lib.is_empty() && config.bin.is_empty() {
         Ok(convention_targets(&config.project.name))
     } else {
-        resolve_targets(&config.targets)
+        resolve_targets(&config.lib, &config.bin)
     }
 }
 
@@ -341,7 +362,8 @@ mod tests {
                 cache_dir: "build".to_string(),
             },
             dependencies: std::collections::BTreeMap::new(),
-            targets: vec![],
+            lib: vec![],
+            bin: vec![],
             cmake: CMakeConfig::default(),
             conan: ConanConfig::default(),
             testing: TestingConfig::default(),
@@ -446,28 +468,23 @@ mod tests {
                 cache_dir: "build".to_string(),
             },
             dependencies: std::collections::BTreeMap::new(),
-            targets: vec![
-                crate::config::TargetConfig {
-                    name: "mylib".into(),
-                    target_type: crate::config::TargetType::StaticLibrary,
-                    sources: vec![lib_dir.to_str().unwrap().to_string()],
-                    public_include: vec!["include".into()],
-                    link: vec![],
-                },
-                crate::config::TargetConfig {
+            lib: vec![crate::config::LibConfig {
+                name: "mylib".into(),
+                sources: vec![lib_dir.to_str().unwrap().to_string()],
+                public_include: vec!["include".into()],
+                link: vec![],
+            }],
+            bin: vec![
+                crate::config::BinConfig {
                     name: "myapp".into(),
-                    target_type: crate::config::TargetType::Executable,
                     sources: vec![
                         tmp.path().join("src/main.cpp").to_str().unwrap().to_string(),
                     ],
-                    public_include: vec![],
                     link: vec!["mylib".into()],
                 },
-                crate::config::TargetConfig {
+                crate::config::BinConfig {
                     name: "mytool".into(),
-                    target_type: crate::config::TargetType::Executable,
                     sources: vec![tool_dir.to_str().unwrap().to_string()],
-                    public_include: vec![],
                     link: vec!["mylib".into()],
                 },
             ],
@@ -543,7 +560,7 @@ mod tests {
 
     #[test]
     fn test_resolve_targets_valid() {
-        use crate::config::{TargetConfig, TargetType};
+        use crate::config::{BinConfig, LibConfig};
 
         let tmp = tempfile::TempDir::new().unwrap();
         let src = tmp.path().join("src");
@@ -552,24 +569,19 @@ mod tests {
         let main_cpp = tmp.path().join("main.cpp");
         std::fs::write(&main_cpp, "int main() {}").unwrap();
 
-        let targets = vec![
-            TargetConfig {
-                name: "mylib".into(),
-                target_type: TargetType::StaticLibrary,
-                sources: vec![src.to_str().unwrap().to_string()],
-                public_include: vec!["include".into()],
-                link: vec![],
-            },
-            TargetConfig {
-                name: "myapp".into(),
-                target_type: TargetType::Executable,
-                sources: vec![main_cpp.to_str().unwrap().to_string()],
-                public_include: vec![],
-                link: vec!["mylib".into()],
-            },
-        ];
+        let libs = vec![LibConfig {
+            name: "mylib".into(),
+            sources: vec![src.to_str().unwrap().to_string()],
+            public_include: vec!["include".into()],
+            link: vec![],
+        }];
+        let bins = vec![BinConfig {
+            name: "myapp".into(),
+            sources: vec![main_cpp.to_str().unwrap().to_string()],
+            link: vec!["mylib".into()],
+        }];
 
-        let effective = resolve_targets(&targets).unwrap();
+        let effective = resolve_targets(&libs, &bins).unwrap();
         assert_eq!(effective.len(), 2);
         assert_eq!(effective[0].name, "mylib");
         assert_eq!(effective[0].source_files.len(), 1);
