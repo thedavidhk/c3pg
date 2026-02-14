@@ -9,9 +9,7 @@ fn check_tool(runner: &impl CommandRunner, name: &str, install_hint: &str) -> an
     let result = runner.command(name).args(["--version"]).run();
     match result {
         Ok(r) if r.success => Ok(()),
-        _ => anyhow::bail!(
-            "`{name}` not found on PATH -- {install_hint}"
-        ),
+        _ => anyhow::bail!("`{name}` not found on PATH -- {install_hint}"),
     }
 }
 
@@ -110,9 +108,11 @@ mod tests {
 
     #[test]
     fn test_hint_for_error_matches() {
-        assert!(hint_for_error("Could not find toolchain file: build/conan_toolchain.cmake")
-            .unwrap()
-            .contains("c3pg build"));
+        assert!(
+            hint_for_error("Could not find toolchain file: build/conan_toolchain.cmake")
+                .unwrap()
+                .contains("c3pg build")
+        );
     }
 
     #[test]

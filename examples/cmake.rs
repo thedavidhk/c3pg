@@ -1,6 +1,8 @@
 use c3pg::cmake_core::{
-    DiscoverMode, LibType, Package, Project, Scope::PRIVATE, Target, TestEntry, TestFramework, TestSuite,
-    Value::{Str, Raw},
+    DiscoverMode, LibType, Package, Project,
+    Scope::PRIVATE,
+    Target, TestEntry, TestFramework, TestSuite,
+    Value::{Raw, Str},
 };
 
 fn main() {
@@ -37,8 +39,9 @@ int main(int argc, char** argv) {
     let entries = ["tests/test_math.cpp", "tests/test_utils.cpp"]
         .iter()
         .map(|p| {
-            let base =
-                sanitize_to_c_identifier(p.split('/').next_back().unwrap().split('.').next().unwrap());
+            let base = sanitize_to_c_identifier(
+                p.split('/').next_back().unwrap().split('.').next().unwrap(),
+            );
             TestEntry {
                 exe_name: base.clone(),
                 sources: vec![Str(p.to_string()), Raw("${C3PG_GTEST_MAIN}".into())],
@@ -69,7 +72,8 @@ int main(int argc, char** argv) {
         .target(lib)
         .target(app)
         .with_tests(suite)
-        .emit().unwrap();
+        .emit()
+        .unwrap();
 
     println!("{txt}");
 }
@@ -83,11 +87,7 @@ fn sanitize_to_c_identifier(s: &str) -> String {
             '_'
         });
     }
-    if out
-        .chars()
-        .next()
-        .is_some_and(|c| c.is_ascii_digit())
-    {
+    if out.chars().next().is_some_and(|c| c.is_ascii_digit()) {
         out.insert(0, '_');
     }
     out

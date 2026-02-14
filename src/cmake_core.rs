@@ -242,19 +242,19 @@ impl Project {
         self
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn find_package(mut self, package: Package) -> Self {
         self.packages.push(package);
         self
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn target(mut self, t: Target) -> Self {
         self.targets.push(t);
         self
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn with_tests(mut self, suite: TestSuite) -> Self {
         self.tests = Some(suite);
         self

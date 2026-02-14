@@ -273,7 +273,11 @@ mod tests {
         assert!(conf.1.contains(&"-S".to_string()));
         assert!(conf.1.contains(&"src_dir".to_string()));
         // Toolchain path is absolute; just verify the flag is present and ends correctly
-        let tc_arg = conf.1.iter().find(|a| a.starts_with("-DCMAKE_TOOLCHAIN_FILE=")).unwrap();
+        let tc_arg = conf
+            .1
+            .iter()
+            .find(|a| a.starts_with("-DCMAKE_TOOLCHAIN_FILE="))
+            .unwrap();
         assert!(
             tc_arg.ends_with("build_dir/conan_toolchain.cmake"),
             "Expected toolchain arg to end with build_dir/conan_toolchain.cmake, got: {tc_arg}"

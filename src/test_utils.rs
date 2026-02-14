@@ -16,7 +16,7 @@ pub struct MockCommandRunner {
 impl MockCommandRunner {
     /// Create a mock runner where unmatched commands return the given output.
     /// Pass `None` to simulate command failure by default.
-    #[must_use] 
+    #[must_use]
     pub fn new(output: Option<String>) -> Self {
         let success = output.is_some();
         let stdout = output.unwrap_or_default();
@@ -43,7 +43,10 @@ impl MockCommandRunner {
     pub fn on(&self, cmd: &str, args_contain: &[&str], result: CommandResult) -> &Self {
         self.responses.borrow_mut().push(MockResponse {
             cmd: cmd.to_string(),
-            args_contain: args_contain.iter().map(std::string::ToString::to_string).collect(),
+            args_contain: args_contain
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
             result,
         });
         self
@@ -72,7 +75,10 @@ impl MockCommandRunner {
     pub fn assert_ran(&self, cmd: &str, args_contain: &[&str]) {
         let cmds = self.executed_commands.borrow();
         let found = cmds.iter().any(|(c, a)| {
-            c == cmd && args_contain.iter().all(|needle| a.iter().any(|arg| arg == needle))
+            c == cmd
+                && args_contain
+                    .iter()
+                    .all(|needle| a.iter().any(|arg| arg == needle))
         });
         assert!(
             found,

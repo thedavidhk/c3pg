@@ -300,8 +300,10 @@ fn inline_dependency_subtables(toml_str: &str) -> String {
             if let Some(name) = rest.strip_suffix(']') {
                 // Flush previous subtable if any
                 if let Some(dep_name) = current_dep_name.take() {
-                    inline_entries
-                        .push(format!("{dep_name} = {{ {} }}", current_kv_pairs.join(", ")));
+                    inline_entries.push(format!(
+                        "{dep_name} = {{ {} }}",
+                        current_kv_pairs.join(", ")
+                    ));
                     current_kv_pairs.clear();
                     skip_ranges.push((subtable_start, line_start));
                 }
@@ -319,8 +321,10 @@ fn inline_dependency_subtables(toml_str: &str) -> String {
             if trimmed.starts_with('[') {
                 // End of subtable
                 if let Some(dep_name) = current_dep_name.take() {
-                    inline_entries
-                        .push(format!("{dep_name} = {{ {} }}", current_kv_pairs.join(", ")));
+                    inline_entries.push(format!(
+                        "{dep_name} = {{ {} }}",
+                        current_kv_pairs.join(", ")
+                    ));
                     current_kv_pairs.clear();
                     skip_ranges.push((subtable_start, line_start));
                 }
@@ -333,7 +337,10 @@ fn inline_dependency_subtables(toml_str: &str) -> String {
 
     // Flush final subtable
     if let Some(dep_name) = current_dep_name.take() {
-        inline_entries.push(format!("{dep_name} = {{ {} }}", current_kv_pairs.join(", ")));
+        inline_entries.push(format!(
+            "{dep_name} = {{ {} }}",
+            current_kv_pairs.join(", ")
+        ));
         skip_ranges.push((subtable_start, toml_str.len()));
     }
 
@@ -704,7 +711,9 @@ mylib = { version = "1.0.0", user = "probe", channel = "release" }
 
         // Detailed dependency should be an inline table (not a subtable)
         assert!(
-            serialized.contains("mylib = { version = \"1.0.0\", user = \"probe\", channel = \"release\" }"),
+            serialized.contains(
+                "mylib = { version = \"1.0.0\", user = \"probe\", channel = \"release\" }"
+            ),
             "Expected inline table format for detailed dep, got:\n{serialized}"
         );
         assert!(
@@ -747,7 +756,9 @@ mylib = { version = "1.0.0", user = "probe", channel = "release" }
             "Expected [dependencies] header, got:\n{serialized}"
         );
         assert!(
-            serialized.contains("mylib = { version = \"1.0.0\", user = \"probe\", channel = \"release\" }"),
+            serialized.contains(
+                "mylib = { version = \"1.0.0\", user = \"probe\", channel = \"release\" }"
+            ),
             "Expected inline table, got:\n{serialized}"
         );
         assert!(

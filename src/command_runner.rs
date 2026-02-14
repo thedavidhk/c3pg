@@ -17,7 +17,7 @@ pub enum StreamMode {
 /// -q / Error:    only show errors (stderr)
 /// Info/Warn:     only show warnings/errors (stderr)
 /// -v / -vv:      show stdout + stderr (prefix at -vv)
-#[must_use] 
+#[must_use]
 pub fn tool_stream_mode(level: LevelFilter) -> StreamMode {
     match level {
         LevelFilter::Off | LevelFilter::Error | LevelFilter::Warn | LevelFilter::Info => {
@@ -43,7 +43,7 @@ pub fn tool_stream_mode(level: LevelFilter) -> StreamMode {
 /// For the user binary (`cmd_run`):
 /// Default: show everything live.
 /// -q / Error / Warn: suppress live output (buffer; show only on failure).
-#[must_use] 
+#[must_use]
 pub fn binary_stream_mode(level: LevelFilter) -> StreamMode {
     match level {
         LevelFilter::Off | LevelFilter::Error | LevelFilter::Warn => StreamMode::Buffer,

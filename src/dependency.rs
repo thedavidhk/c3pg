@@ -12,7 +12,7 @@ pub struct Dependency {
 }
 
 impl Dependency {
-    #[must_use] 
+    #[must_use]
     pub fn matches(&self, other: &Dependency) -> bool {
         self.name == other.name
             && (self.version.is_none() || other.version.is_none() || self.version == other.version)

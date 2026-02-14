@@ -91,7 +91,14 @@ pub fn cmd_new(
 ) -> Result<()> {
     let project_path = PathBuf::from(sandbox_name);
     let git_dir = if git { Some(sandbox_name) } else { None };
-    scaffold_project(&runner, &project_path, sandbox_name, git_dir, standard, true)?;
+    scaffold_project(
+        &runner,
+        &project_path,
+        sandbox_name,
+        git_dir,
+        standard,
+        true,
+    )?;
     ui::status("Created", sandbox_name);
     Ok(())
 }
@@ -105,20 +112,17 @@ pub fn cmd_new(
 ///
 /// Returns an error if `c3pg.toml` already exists, directory creation fails,
 /// or `git init` fails when `git` is `true`.
-pub fn cmd_init(
-    runner: impl CommandRunner,
-    git: bool,
-    standard: CppStandard,
-) -> Result<()> {
+pub fn cmd_init(runner: impl CommandRunner, git: bool, standard: CppStandard) -> Result<()> {
     let project_path = std::env::current_dir().context("could not determine working directory")?;
 
     if project_path.join("c3pg.toml").exists() {
         bail!("c3pg.toml already exists -- project is already initialized");
     }
 
-    let name = project_path
-        .file_name()
-        .map_or_else(|| "sandbox".to_string(), |n| n.to_string_lossy().into_owned());
+    let name = project_path.file_name().map_or_else(
+        || "sandbox".to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    );
 
     // Only write main.cpp if src/ doesn't already have source files
     let src_dir = project_path.join("src");
@@ -128,7 +132,14 @@ pub fn cmd_init(
             .unwrap_or(false);
 
     let git_dir = if git { Some(".") } else { None };
-    scaffold_project(&runner, &project_path, &name, git_dir, standard, !has_sources)?;
+    scaffold_project(
+        &runner,
+        &project_path,
+        &name,
+        git_dir,
+        standard,
+        !has_sources,
+    )?;
     ui::status("Initialized", &name);
     Ok(())
 }
@@ -221,13 +232,7 @@ fn cmd_build_inner(
     // cmake picks up the correct compiler.
     let build_env = conan::parse_conan_build_env(&cache_dir);
     CMake::build(
-        runner,
-        build_type,
-        &cache_dir,
-        &cache_dir,
-        lvl,
-        &build_env,
-        sanitizers,
+        runner, build_type, &cache_dir, &cache_dir, lvl, &build_env, sanitizers,
     )
     .context("cmake build failed")?;
 
@@ -271,9 +276,7 @@ pub fn cmd_run(
         .command(binary_path.to_string_lossy())
         .stream_mode(binary_stream_mode(lvl))
         .run()?
-        .expect_success_with_stdout(
-            &format!("failed to run {}", binary_path.display()),
-        )?;
+        .expect_success_with_stdout(&format!("failed to run {}", binary_path.display()))?;
 
     Ok(())
 }
@@ -352,7 +355,10 @@ pub fn cmd_test(runner: impl CommandRunner, args: TestArgs, lvl: LevelFilter) ->
                 .map(|rd| rd.count() == 0)
                 .unwrap_or(true)
         {
-            ui::status("Info", "no tests found -- use `c3pg test add <name>` to create one");
+            ui::status(
+                "Info",
+                "no tests found -- use `c3pg test add <name>` to create one",
+            );
             return Ok(());
         }
         testing_run(runner, lvl, &config, args.filter.as_deref(), args.jobs)
@@ -411,11 +417,7 @@ pub fn find_and_add_dependency(
 }
 
 /// Regenerate `conanfile.py` and `CMakeLists.txt` in `cache_dir` from `config`.
-fn write_build_files(
-    runner: &impl CommandRunner,
-    config: &Config,
-    cache_dir: &Path,
-) -> Result<()> {
+fn write_build_files(runner: &impl CommandRunner, config: &Config, cache_dir: &Path) -> Result<()> {
     Conan::from_config(runner, config)?.to_file(cache_dir.join("conanfile.py"))?;
     fs::write(
         cache_dir.join("CMakeLists.txt"),
