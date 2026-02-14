@@ -122,7 +122,7 @@ fn test_new_with_cpp17_standard() {
 
     // Config should have Cpp17
     let config = c3pg::config::Config::from_file(root.join("c3pg.toml")).unwrap();
-    assert_eq!(config.cmake.standard, CppStandard::Cpp17);
+    assert_eq!(config.project.standard, CppStandard::Cpp17);
 
     // CMakeLists.txt should reference standard 17
     assert_file_contains(&root.join("build/CMakeLists.txt"), "CMAKE_CXX_STANDARD 17");

@@ -315,6 +315,7 @@ mod tests {
         let config = Config {
             project: crate::config::Project {
                 name: "TestProject".to_string(),
+                standard: crate::cmake::CppStandard::default(),
                 dependencies: vec![Dependency {
                     name: "TestDependency".to_string(),
                     ..Default::default()

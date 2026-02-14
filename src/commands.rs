@@ -57,7 +57,7 @@ fn scaffold_project(
     }
 
     config.project.name = name.to_string();
-    config.cmake.standard = standard;
+    config.project.standard = standard;
     write_build_files(runner, &config, &cache_dir)?;
     config.to_file(project_path.join("c3pg.toml"))?;
 

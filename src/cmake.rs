@@ -44,6 +44,15 @@ pub enum CppStandard {
     Cpp23,
 }
 
+impl CppStandard {
+    /// Returns true when the value is the default (`Cpp20`).  Used by serde
+    /// `skip_serializing_if` to omit the field when unset.
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 impl Display for CppStandard {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
