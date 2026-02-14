@@ -14,8 +14,11 @@ pub struct Config {
     pub project: Project,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub targets: Vec<TargetConfig>,
+    #[serde(default, skip_serializing_if = "CMakeConfig::is_default")]
     pub cmake: CMakeConfig,
+    #[serde(default, skip_serializing_if = "ConanConfig::is_default")]
     pub conan: ConanConfig,
+    #[serde(default, skip_serializing_if = "TestingConfig::is_default")]
     pub testing: TestingConfig,
 }
 
@@ -209,11 +212,17 @@ where
         .collect()
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CMakeConfig {
     pub standard: CppStandard,
     pub export_compile_commands: bool,
+}
+
+impl CMakeConfig {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 impl Default for CMakeConfig {
@@ -225,11 +234,17 @@ impl Default for CMakeConfig {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ConanConfig {
     pub bin: String,
     pub remote: Option<String>,
+}
+
+impl ConanConfig {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 impl Default for ConanConfig {
@@ -241,10 +256,16 @@ impl Default for ConanConfig {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TestingConfig {
     pub dir: String,
+}
+
+impl TestingConfig {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 impl Default for TestingConfig {
