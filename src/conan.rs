@@ -83,7 +83,11 @@ impl Conan {
 
         args.push(dir.into());
 
-        args.extend(conan_verbosity_args(lvl).iter().map(std::string::ToString::to_string));
+        args.extend(
+            conan_verbosity_args(lvl)
+                .iter()
+                .map(std::string::ToString::to_string),
+        );
 
         runner
             .command(&self.bin)
@@ -309,8 +313,9 @@ mod tests {
 
     #[test]
     fn test_conan_from_config_with_remote_fallback() {
-        let mock_runner =
-            MockCommandRunner::new(Some("default_remote: https://example.com [Enabled]".to_string()));
+        let mock_runner = MockCommandRunner::new(Some(
+            "default_remote: https://example.com [Enabled]".to_string(),
+        ));
 
         let mut config = Config::default();
         config.project.name = "TestProject".to_string();

@@ -1,11 +1,13 @@
-use c3pg::{cmake, cli, command_runner, commands, diagnostics, format, ui};
+use c3pg::{cli, cmake, command_runner, commands, diagnostics, format, ui};
 
 use anyhow::Result;
 use clap::Parser;
 use command_runner::SystemCommandRunner;
 
 use crate::cli::{Cli, Commands};
-use crate::commands::{cmd_new, cmd_init, cmd_add, cmd_remove, cmd_build, cmd_run, cmd_test, cmd_clean, load_config};
+use crate::commands::{
+    cmd_add, cmd_build, cmd_clean, cmd_init, cmd_new, cmd_remove, cmd_run, cmd_test, load_config,
+};
 
 fn build_type(release: bool) -> cmake::BuildType {
     if release {
@@ -37,17 +39,29 @@ fn run() -> Result<()> {
             no_git,
             standard,
         } => cmd_new(&runner, &sandbox_name, no_git, standard.unwrap_or_default())?,
-        Commands::Init {
-            no_git,
-            standard,
-        } => cmd_init(&runner, no_git, standard.unwrap_or_default())?,
+        Commands::Init { no_git, standard } => {
+            cmd_init(&runner, no_git, standard.unwrap_or_default())?
+        }
         Commands::Add { dependency } => cmd_add(&runner, &dependency)?,
         Commands::Remove { dependency } => cmd_remove(&runner, &dependency)?,
-        Commands::Build { release, sanitizers } => {
+        Commands::Build {
+            release,
+            sanitizers,
+        } => {
             cmd_build(&runner, build_type(release), lvl, &sanitizers)?;
         }
-        Commands::Run { release, target, sanitizers } => {
-            cmd_run(&runner, build_type(release), lvl, &sanitizers, target.as_deref())?;
+        Commands::Run {
+            release,
+            target,
+            sanitizers,
+        } => {
+            cmd_run(
+                &runner,
+                build_type(release),
+                lvl,
+                &sanitizers,
+                target.as_deref(),
+            )?;
         }
         Commands::Fmt { check } => {
             let config = load_config(&runner)?;

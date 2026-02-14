@@ -110,11 +110,7 @@ pub fn testing_run(
     testing_build(&runner, lvl, config, jobs)?;
     ui::status(
         "Testing",
-        &format!(
-            "{} ({} jobs)",
-            filter.unwrap_or("*"),
-            jobs.unwrap_or(1)
-        ),
+        &format!("{} ({} jobs)", filter.unwrap_or("*"), jobs.unwrap_or(1)),
     );
     let cache_dir = config.project.cache_dir.as_str();
     let mut args = vec!["--test-dir", cache_dir, "--output-on-failure"];

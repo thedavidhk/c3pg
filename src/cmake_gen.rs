@@ -141,10 +141,7 @@ fn build_test_suite(
             .and_then(|s| s.to_str())
             .unwrap_or("test");
         let safe_name = sanitize_to_c_identifier(base);
-        let mut link: Vec<Value> = lib_names
-            .iter()
-            .map(|n| Value::Str(n.clone()))
-            .collect();
+        let mut link: Vec<Value> = lib_names.iter().map(|n| Value::Str(n.clone())).collect();
         if link.is_empty() {
             link.push(Value::Raw("${CONANDEPS_LEGACY}".into()));
         }
@@ -193,7 +190,9 @@ pub const HEADER_EXTENSIONS: [&str; 4] = ["h", "hpp", "hxx", "hh"];
 /// `"${CMAKE_CURRENT_LIST_DIR}/../.."`, etc.
 fn cmake_project_root_ref(cache_dir: &str) -> String {
     let depth = Path::new(cache_dir).components().count();
-    let ups = std::iter::repeat_n("..", depth).collect::<Vec<_>>().join("/");
+    let ups = std::iter::repeat_n("..", depth)
+        .collect::<Vec<_>>()
+        .join("/");
     format!("${{CMAKE_CURRENT_LIST_DIR}}/{ups}")
 }
 
@@ -336,11 +335,7 @@ fn sanitize_to_c_identifier(s: &str) -> String {
             '_'
         });
     }
-    if out
-        .chars()
-        .next()
-        .is_some_and(|c| c.is_ascii_digit())
-    {
+    if out.chars().next().is_some_and(|c| c.is_ascii_digit()) {
         out.insert(0, '_');
     }
     out
@@ -477,9 +472,12 @@ mod tests {
             bin: vec![
                 crate::config::BinConfig {
                     name: "myapp".into(),
-                    sources: vec![
-                        tmp.path().join("src/main.cpp").to_str().unwrap().to_string(),
-                    ],
+                    sources: vec![tmp
+                        .path()
+                        .join("src/main.cpp")
+                        .to_str()
+                        .unwrap()
+                        .to_string()],
                     link: vec!["mylib".into()],
                 },
                 crate::config::BinConfig {

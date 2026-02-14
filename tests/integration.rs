@@ -7,8 +7,8 @@ use std::sync::Mutex;
 
 use c3pg::cli::{TestArgs, TestOnlySubcmds};
 use c3pg::cmake::{BuildType, CppStandard, Sanitizers};
-use c3pg::config::DependencyValue;
 use c3pg::commands::*;
+use c3pg::config::DependencyValue;
 use c3pg::test_utils::MockCommandRunner;
 use c3pg::traits::FromFile;
 use log::LevelFilter;
@@ -25,7 +25,9 @@ fn with_cwd<F, R>(dir: &Path, f: F) -> R
 where
     F: FnOnce() -> R,
 {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _guard = CWD_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let original = std::env::current_dir().unwrap();
     std::env::set_current_dir(dir).unwrap();
     let result = std::panic::catch_unwind(AssertUnwindSafe(f));
@@ -140,7 +142,10 @@ fn test_new_fails_gracefully_if_conan_has_no_remotes() {
         cmd_new(&runner, "failproj", false, CppStandard::default())
     });
 
-    assert!(result.is_err(), "Expected cmd_new to fail when conan has no remotes");
+    assert!(
+        result.is_err(),
+        "Expected cmd_new to fail when conan has no remotes"
+    );
     let err_msg = format!("{:#}", result.unwrap_err());
     assert!(
         err_msg.contains("remote") || err_msg.contains("empty"),
@@ -281,7 +286,11 @@ fn test_add_dependency_replaces_existing() {
 
     // Should still only have one fmt entry
     assert_eq!(
-        config2.dependencies.keys().filter(|k| k.as_str() == "fmt").count(),
+        config2
+            .dependencies
+            .keys()
+            .filter(|k| k.as_str() == "fmt")
+            .count(),
         1
     );
 }
@@ -326,9 +335,7 @@ fn test_remove_nonexistent_dependency() {
     let (tmp, _) = setup_project_dir("removefail");
     let runner = mock_with_conan_responses();
 
-    let result = with_cwd(tmp.path(), || {
-        cmd_remove(&runner, "nonexistent")
-    });
+    let result = with_cwd(tmp.path(), || cmd_remove(&runner, "nonexistent"));
 
     assert!(result.is_err());
     let err_msg = format!("{:#}", result.unwrap_err());
@@ -348,7 +355,13 @@ fn test_build_invokes_conan_install_then_cmake() {
     let runner = mock_with_conan_responses();
 
     with_cwd(tmp.path(), || {
-        cmd_build(&runner, BuildType::Debug, LevelFilter::Info, &Sanitizers::default()).unwrap();
+        cmd_build(
+            &runner,
+            BuildType::Debug,
+            LevelFilter::Info,
+            &Sanitizers::default(),
+        )
+        .unwrap();
     });
 
     // Should have run conan install
@@ -363,11 +376,23 @@ fn test_build_invokes_conan_install_then_cmake() {
     // Verify command order: conan before cmake
     let cmds = runner.executed_commands();
     let conan_idx = cmds.iter().position(|(c, _)| c == "conan").unwrap();
-    let cmake_configure_idx = cmds.iter().position(|(c, a)| c == "cmake" && a.contains(&"-B".to_string())).unwrap();
-    let cmake_build_idx = cmds.iter().position(|(c, a)| c == "cmake" && a.contains(&"--build".to_string())).unwrap();
+    let cmake_configure_idx = cmds
+        .iter()
+        .position(|(c, a)| c == "cmake" && a.contains(&"-B".to_string()))
+        .unwrap();
+    let cmake_build_idx = cmds
+        .iter()
+        .position(|(c, a)| c == "cmake" && a.contains(&"--build".to_string()))
+        .unwrap();
 
-    assert!(conan_idx < cmake_configure_idx, "conan install should run before cmake configure");
-    assert!(cmake_configure_idx < cmake_build_idx, "cmake configure should run before cmake build");
+    assert!(
+        conan_idx < cmake_configure_idx,
+        "conan install should run before cmake configure"
+    );
+    assert!(
+        cmake_configure_idx < cmake_build_idx,
+        "cmake configure should run before cmake build"
+    );
 }
 
 #[test]
@@ -376,7 +401,13 @@ fn test_build_passes_build_type() {
     let runner = mock_with_conan_responses();
 
     with_cwd(tmp.path(), || {
-        cmd_build(&runner, BuildType::Release, LevelFilter::Info, &Sanitizers::default()).unwrap();
+        cmd_build(
+            &runner,
+            BuildType::Release,
+            LevelFilter::Info,
+            &Sanitizers::default(),
+        )
+        .unwrap();
     });
 
     // Conan should receive build_type=Release
@@ -394,7 +425,14 @@ fn test_run_builds_then_executes_binary() {
     runner.on_success("build/runtest", &[], "Hello from C3PG!");
 
     with_cwd(tmp.path(), || {
-        cmd_run(&runner, BuildType::Debug, LevelFilter::Info, &Sanitizers::default(), None).unwrap();
+        cmd_run(
+            &runner,
+            BuildType::Debug,
+            LevelFilter::Info,
+            &Sanitizers::default(),
+            None,
+        )
+        .unwrap();
     });
 
     // Build commands should have run
@@ -534,9 +572,7 @@ fn test_test_run_with_no_tests_prints_message() {
     };
 
     // No test files exist => should return Ok without running cmake/ctest
-    let result = with_cwd(tmp.path(), || {
-        cmd_test(&runner, args, LevelFilter::Info)
-    });
+    let result = with_cwd(tmp.path(), || cmd_test(&runner, args, LevelFilter::Info));
     assert!(result.is_ok());
 
     // Should NOT have run cmake or ctest
@@ -576,12 +612,13 @@ fn test_clean_succeeds_when_no_cache_dir() {
     fs::remove_dir_all(tmp.path().join("build")).unwrap();
     assert!(!tmp.path().join("build").is_dir());
 
-    let result = with_cwd(tmp.path(), || {
-        cmd_clean(&runner)
-    });
+    let result = with_cwd(tmp.path(), || cmd_clean(&runner));
 
     // Should succeed without error
-    assert!(result.is_ok(), "cmd_clean should succeed even when cache dir doesn't exist");
+    assert!(
+        result.is_ok(),
+        "cmd_clean should succeed even when cache dir doesn't exist"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -594,7 +631,13 @@ fn test_build_calls_conan_lock_create() {
     let runner = mock_with_conan_responses();
 
     with_cwd(tmp.path(), || {
-        cmd_build(&runner, BuildType::Debug, LevelFilter::Info, &Sanitizers::default()).unwrap();
+        cmd_build(
+            &runner,
+            BuildType::Debug,
+            LevelFilter::Info,
+            &Sanitizers::default(),
+        )
+        .unwrap();
     });
 
     runner.assert_ran("conan", &["lock", "create"]);
@@ -609,7 +652,13 @@ fn test_build_with_existing_lockfile_passes_it_to_install() {
     fs::write(tmp.path().join("c3pg.lock"), "{}").unwrap();
 
     with_cwd(tmp.path(), || {
-        cmd_build(&runner, BuildType::Debug, LevelFilter::Info, &Sanitizers::default()).unwrap();
+        cmd_build(
+            &runner,
+            BuildType::Debug,
+            LevelFilter::Info,
+            &Sanitizers::default(),
+        )
+        .unwrap();
     });
 
     // conan install should have received --lockfile=c3pg.lock
@@ -751,7 +800,13 @@ fn test_multitarget_build_invokes_cmake() {
     let runner = mock_with_conan_responses();
 
     with_cwd(tmp.path(), || {
-        cmd_build(&runner, BuildType::Debug, LevelFilter::Info, &Sanitizers::default()).unwrap();
+        cmd_build(
+            &runner,
+            BuildType::Debug,
+            LevelFilter::Info,
+            &Sanitizers::default(),
+        )
+        .unwrap();
     });
 
     // Should have invoked conan install and cmake build
@@ -766,13 +821,28 @@ fn test_multitarget_generates_correct_cmake() {
 
     with_cwd(tmp.path(), || {
         // build_config regenerates CMakeLists.txt
-        cmd_build(&runner, BuildType::Debug, LevelFilter::Info, &Sanitizers::default()).unwrap();
+        cmd_build(
+            &runner,
+            BuildType::Debug,
+            LevelFilter::Info,
+            &Sanitizers::default(),
+        )
+        .unwrap();
     });
 
     let cmake = fs::read_to_string(tmp.path().join("build/CMakeLists.txt")).unwrap();
-    assert!(cmake.contains("add_library(mylib STATIC"), "Expected mylib library:\n{cmake}");
-    assert!(cmake.contains("add_executable(myapp"), "Expected myapp executable:\n{cmake}");
-    assert!(cmake.contains("add_executable(mytool"), "Expected mytool executable:\n{cmake}");
+    assert!(
+        cmake.contains("add_library(mylib STATIC"),
+        "Expected mylib library:\n{cmake}"
+    );
+    assert!(
+        cmake.contains("add_executable(myapp"),
+        "Expected myapp executable:\n{cmake}"
+    );
+    assert!(
+        cmake.contains("add_executable(mytool"),
+        "Expected mytool executable:\n{cmake}"
+    );
 }
 
 #[test]
@@ -781,10 +851,19 @@ fn test_multitarget_run_requires_target() {
     let runner = mock_with_conan_responses();
 
     let result = with_cwd(tmp.path(), || {
-        cmd_run(&runner, BuildType::Debug, LevelFilter::Info, &Sanitizers::default(), None)
+        cmd_run(
+            &runner,
+            BuildType::Debug,
+            LevelFilter::Info,
+            &Sanitizers::default(),
+            None,
+        )
     });
 
-    assert!(result.is_err(), "cmd_run without --target should fail with multiple executables");
+    assert!(
+        result.is_err(),
+        "cmd_run without --target should fail with multiple executables"
+    );
     let err_msg = format!("{}", result.unwrap_err());
     assert!(
         err_msg.contains("multiple") || err_msg.contains("--target"),

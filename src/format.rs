@@ -94,9 +94,7 @@ pub fn cmd_lint(
 ) -> Result<()> {
     let compile_db = Path::new(build_dir).join("compile_commands.json");
     if !compile_db.exists() {
-        bail!(
-            "compile_commands.json not found in {build_dir}/ -- run `c3pg build` first"
-        );
+        bail!("compile_commands.json not found in {build_dir}/ -- run `c3pg build` first");
     }
 
     // clang-tidy operates on source files (not headers)

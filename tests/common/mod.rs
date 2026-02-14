@@ -95,7 +95,11 @@ pub fn setup_multitarget_project(name: &str) -> (TempDir, Config) {
     fs::create_dir_all(root.join("build")).unwrap();
 
     // Write source files
-    fs::write(root.join("src/lib/math.cpp"), "int add(int a, int b) { return a + b; }\n").unwrap();
+    fs::write(
+        root.join("src/lib/math.cpp"),
+        "int add(int a, int b) { return a + b; }\n",
+    )
+    .unwrap();
     fs::write(root.join("src/main.cpp"), "int main() { return 0; }\n").unwrap();
     fs::write(root.join("src/tool/tool.cpp"), "int main() { return 0; }\n").unwrap();
 
@@ -131,11 +135,7 @@ pub fn setup_multitarget_project(name: &str) -> (TempDir, Config) {
 
 /// Assert a file exists at the given path.
 pub fn assert_file_exists(path: &Path) {
-    assert!(
-        path.exists(),
-        "Expected file to exist: {}",
-        path.display()
-    );
+    assert!(path.exists(), "Expected file to exist: {}", path.display());
 }
 
 /// Assert a file exists and contains the given substring.
