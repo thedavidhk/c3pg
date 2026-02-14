@@ -23,7 +23,7 @@ use walkdir::WalkDir;
 /// [`Project::emit`](crate::cmake_core::Project::emit) call fails.
 pub fn generate_cmakelists(config: &Config) -> Result<String> {
     let project_name = &config.project.name;
-    let std_str = config.cmake.standard.to_string();
+    let std_str = config.project.standard.to_string();
 
     // Compute the relative path from cache_dir back to the project root.
     let project_root_ref = cmake_project_root_ref(&config.project.cache_dir);
@@ -337,14 +337,12 @@ mod tests {
         Config {
             project: crate::config::Project {
                 name: name.to_string(),
+                standard,
                 dependencies: vec![],
                 cache_dir: "build".to_string(),
             },
             targets: vec![],
-            cmake: CMakeConfig {
-                standard,
-                export_compile_commands: true,
-            },
+            cmake: CMakeConfig::default(),
             conan: ConanConfig::default(),
             testing: TestingConfig::default(),
         }
@@ -444,6 +442,7 @@ mod tests {
         let config = Config {
             project: crate::config::Project {
                 name: "multi".to_string(),
+                standard: CppStandard::Cpp20,
                 dependencies: vec![],
                 cache_dir: "build".to_string(),
             },
@@ -472,10 +471,7 @@ mod tests {
                     link: vec!["mylib".into()],
                 },
             ],
-            cmake: CMakeConfig {
-                standard: CppStandard::Cpp20,
-                export_compile_commands: true,
-            },
+            cmake: CMakeConfig::default(),
             conan: ConanConfig::default(),
             testing: TestingConfig::default(),
         };

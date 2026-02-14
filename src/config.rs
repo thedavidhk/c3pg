@@ -152,6 +152,9 @@ pub struct Project {
     #[serde(default)]
     pub name: String,
 
+    #[serde(default)]
+    pub standard: CppStandard,
+
     #[serde(
         serialize_with = "serialize_dependencies",
         deserialize_with = "deserialize_dependencies"
@@ -187,6 +190,7 @@ impl Default for Project {
     fn default() -> Self {
         Self {
             name: "sandbox".to_string(),
+            standard: CppStandard::default(),
             dependencies: vec![],
             cache_dir: Self::default_cache_dir(),
         }
@@ -215,7 +219,6 @@ where
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CMakeConfig {
-    pub standard: CppStandard,
     pub export_compile_commands: bool,
 }
 
@@ -228,7 +231,6 @@ impl CMakeConfig {
 impl Default for CMakeConfig {
     fn default() -> Self {
         Self {
-            standard: CppStandard::default(),
             export_compile_commands: true,
         }
     }
