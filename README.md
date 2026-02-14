@@ -1,9 +1,8 @@
 # c3pg (C++ Playground)
 
 *c3pg* (**C** **P**lus **P**lus **P**lay**G**round) is a command-line tool designed to simplify the process of creating,
-managing, and running C++ project sandboxes. Inspired by Rust's `cargo`, it aims to make setting up
-quick C++ test projects as easy and efficient as possible, even when working with external
-dependencies.
+managing, and running C++ projects. Inspired by Rust's `cargo`, it aims to make setting up
+C++ projects as easy and efficient as possible, even when working with external dependencies.
 
 While C++ development often involves managing complex build systems like CMake and dependency
 managers like Conan, `c3pg` abstracts these details, allowing you to focus on writing and testing
@@ -11,12 +10,19 @@ code. The complexity still exists, but it stays under the hood.
 
 ## Features
 
-- **Quick Project Setup**: Initialize a new C++ project sandbox with a single command.
-- **Unified Configuration**: Use `c3pg.toml` for all project configuration, similar to `Cargo.toml` in Rust.
+- **Quick Project Setup**: Initialize a new C++ project with a single command.
+- **Convention over Configuration**: Simple projects need only a project name -- no build targets
+  to declare.
+- **Unified Configuration**: Use `c3pg.toml` for all project configuration, similar to `Cargo.toml`
+  in Rust.
 - **Dependency Management**: Easily add and remove Conan dependencies.
-- **Build and Run**: Compile and execute your sandbox projects with minimal effort.
+- **Build and Run**: Compile and execute your projects with minimal effort.
 - **Testing**: Scaffold and run GTest-based tests with auto-detection.
-- **Customizable C++ Standards**: Specify the C++ standard for your projects (e.g., C++20, C++17).
+- **Multi-target Support**: Declare library and executable targets explicitly when needed.
+- **Code Quality**: Format and lint C++ sources with `clang-format` and `clang-tidy`.
+- **Sanitizers**: Enable AddressSanitizer, ThreadSanitizer, or UndefinedBehaviorSanitizer with a
+  single flag.
+- **Customizable C++ Standards**: Specify the C++ standard for your projects (default: C++20).
 - **Git Integration**: Optionally initialize a Git repository for version control.
 
 ---
@@ -41,34 +47,64 @@ This will install the `c3pg` binary locally (by default in `$HOME/.cargo/bin`).
 
 ---
 
-## Usage
-
-### Overview
+## Quick Start
 
 ```bash
-c3pg [COMMAND] [OPTIONS]
+# Create a new project
+c3pg new hello
+
+# Add a dependency, build, and run
+cd hello
+c3pg add fmt
+# edit src/main.cpp to use fmt ...
+c3pg run
+
+# Add and run tests
+c3pg test add math
+# edit tests/test_math.cpp ...
+c3pg test
 ```
+
+---
+
+## Usage
 
 ### Commands
 
 #### `new`
 
-Create a new C++ sandbox project.
+Create a new C++ project.
 
 ```bash
-c3pg new <sandbox_name> [OPTIONS]
+c3pg new <name> [OPTIONS]
 ```
 
 Options:
 
 - `--no-git`: Do not initialize a Git repository.
-- `--standard`: Set the C++ standard for the project (default: C++20).
+- `--standard`: Set the C++ standard (default: C++20).
 
 Example:
 
 ```bash
-c3pg new my_sandbox --standard 17
+c3pg new my_project --standard 17
 ```
+
+#### `init`
+
+Initialize a `c3pg` project in the current directory.
+
+```bash
+c3pg init [OPTIONS]
+```
+
+Options:
+
+- `--no-git`: Do not initialize a Git repository.
+- `--standard`: Set the C++ standard (default: C++20).
+
+If `src/` already contains source files, they are left untouched. Otherwise a
+starter `main.cpp` is created.
 
 #### `add`
 
@@ -84,7 +120,7 @@ Example:
 c3pg add fmt
 ```
 
-`c3pg` looks for the latest version in the default Conan remote by default. Optionally, you can
+`c3pg` looks for the latest version in the default Conan remote. Optionally, you can
 specify a version and/or a user/channel:
 
 ```bash
@@ -100,15 +136,9 @@ Remove a dependency from the current project.
 c3pg remove <dependency>
 ```
 
-Example:
-
-```bash
-c3pg remove fmt
-```
-
 #### `build`
 
-Build the current sandbox project.
+Build the current project.
 
 ```bash
 c3pg build [OPTIONS]
@@ -117,16 +147,13 @@ c3pg build [OPTIONS]
 Options:
 
 - `--release, -r`: Build in release mode (default: debug).
-
-Example:
-
-```bash
-c3pg build --release
-```
+- `--asan`: Enable AddressSanitizer.
+- `--tsan`: Enable ThreadSanitizer.
+- `--ubsan`: Enable UndefinedBehaviorSanitizer.
 
 #### `run`
 
-Run the current sandbox project (builds first if necessary).
+Run the current project (builds first if necessary).
 
 ```bash
 c3pg run [OPTIONS]
@@ -135,13 +162,8 @@ c3pg run [OPTIONS]
 Options:
 
 - `--release, -r`: Build in release mode (default: debug).
-
-Example:
-
-```bash
-c3pg run
-c3pg run --release
-```
+- `--target <name>`: Which executable to run (required when multiple exist).
+- `--asan`, `--tsan`, `--ubsan`: Enable sanitizers.
 
 #### `test`
 
@@ -162,6 +184,7 @@ Options (when running tests):
 
 - `--filter, -f`: Expression to match test cases to run.
 - `--jobs, -j`: Number of parallel test jobs.
+- `--asan`, `--tsan`, `--ubsan`: Enable sanitizers.
 
 Examples:
 
@@ -175,6 +198,31 @@ c3pg test
 # Run only tests matching "math" with 4 jobs
 c3pg test --filter math --jobs 4
 ```
+
+#### `fmt`
+
+Format C/C++ source files with `clang-format`.
+
+```bash
+c3pg fmt [OPTIONS]
+```
+
+Options:
+
+- `--check`: Check formatting without modifying files (exit with error if unformatted).
+
+#### `lint`
+
+Lint C/C++ source files with `clang-tidy` (requires a prior `c3pg build` for
+`compile_commands.json`).
+
+```bash
+c3pg lint [OPTIONS]
+```
+
+Options:
+
+- `--fix`: Apply suggested fixes in-place.
 
 #### `clean`
 
@@ -190,11 +238,11 @@ c3pg clean
 
 ### Project Structure
 
-When you create a new sandbox, `c3pg` generates the following files:
+When you create a new project, `c3pg` generates the following:
 
 ```
 my_project/
-  c3pg.toml          # Unified project configuration
+  c3pg.toml          # Project configuration
   src/
     main.cpp         # "Hello World" starter
   build/
@@ -211,74 +259,79 @@ my_project/
     test_math.cpp    # Scaffolded GTest file
 ```
 
-### Example Workflow
-
-1. Create a new project:
-
-```bash
-c3pg new my_project
-```
-
-2. Add a dependency:
-
-```bash
-c3pg add fmt
-```
-
-3. Edit `src/main.cpp`:
-
-```c++
-#include <fmt/core.h>
-
-int main() {
-    fmt::print("Hello, world!\n");
-}
-```
-
-4. Build and run:
-
-```bash
-c3pg run
-```
-
-5. Add and run tests:
-
-```bash
-c3pg test add math
-# edit tests/test_math.cpp ...
-c3pg test
-```
-
 ---
 
 ## Configuration
 
 ### `c3pg.toml`
 
-The `c3pg.toml` file is the central configuration file for your project. Here's an example:
+The configuration follows a convention-over-configuration approach. A fresh project
+needs only a project name:
 
 ```toml
 [project]
 name = "my_project"
-dependencies = ["fmt/10.1.0", "gtest/1.15.0"]
+```
 
+All sources in `src/` are compiled into a single executable named after the project.
+This is the default when no `[[targets]]` section is present.
+
+#### With a dependency and non-default standard
+
+```toml
+[project]
+name = "my_project"
+standard = "Cpp17"
+dependencies = ["fmt/10.1.0"]
+```
+
+#### Multi-target project (library + executables)
+
+When you need library targets or multiple executables, add `[[targets]]` sections
+explicitly:
+
+```toml
+[project]
+name = "my_project"
+dependencies = ["fmt/10.1.0"]
+
+[[targets]]
+name = "mylib"
+type = "static-library"
+sources = ["src/lib"]
+public-include = ["include"]
+
+[[targets]]
+name = "my_project"
+type = "executable"
+sources = ["src/main.cpp"]
+link = ["mylib"]
+```
+
+#### Optional sections
+
+These sections can be added to override defaults:
+
+```toml
 [cmake]
-standard = "Cpp20"
-export_compile_commands = true
+export_compile_commands = false   # default: true
 
 [conan]
-bin = "conan"
+bin = "/usr/local/bin/conan"      # default: "conan"
+remote = "my_remote"              # default: first configured remote
 
 [testing]
-dir = "tests"
+dir = "test"                      # default: "tests"
 ```
 
 ### Sections
 
-- **`[project]`**: Project-level settings -- name, dependencies, and build cache directory.
-- **`[cmake]`**: CMake-specific settings -- C++ standard and compile-commands export.
-- **`[conan]`**: Conan-specific settings -- binary path and optional remote override.
-- **`[testing]`**: Testing settings -- test source directory (default: `tests`).
+- **`[project]`**: Project name, C++ standard, dependencies, and build cache directory.
+- **`[[targets]]`** (optional): Explicit build targets with type, sources, include dirs, and
+  inter-target linking. Omit for convention-based single-executable projects.
+- **`[cmake]`** (optional): CMake-specific settings.
+- **`[conan]`** (optional): Conan binary path and remote override.
+- **`[testing]`** (optional): Test source directory.
 
 ---
 
