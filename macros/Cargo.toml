@@ -1,7 +1,10 @@
 [package]
-name = "macros"
+name = "c3pg-macros"
 version = "0.1.0"
 edition = "2021"
+description = "Proc macros for the c3pg C++ build tool"
+license = "MIT"
+repository = "https://github.com/thedavidhk/c3pg"
 
 [dependencies]
 proc-macro2 = "1.0"

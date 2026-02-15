@@ -1,5 +1,5 @@
 use anyhow::Result;
-pub use macros::{FromFile, ToFile};
+pub use c3pg_macros::{FromFile, ToFile};
 
 pub trait FromFile {
     /// Deserialize `Self` from the file at `path`.
