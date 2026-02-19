@@ -38,7 +38,16 @@ code. The complexity still exists, but it stays under the hood.
 
 Install these tools via your package manager or their respective websites.
 
-To build and install `c3pg`, use the Rust toolchain:
+To build and install `c3pg` you need the Rust toolchain (see e.g.
+[rustup.rs](https://rustup.rs/)).
+
+To pull the latest release from [crates.io](crates.io) use
+
+```bash
+cargo install c3pg
+```
+
+or to build it locally from this git repo, clone it and run
 
 ```bash
 cargo install --path .
