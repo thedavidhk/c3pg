@@ -62,6 +62,10 @@ pub enum Commands {
         /// Set the `CppStandard`
         #[arg(long)]
         standard: Option<CppStandard>,
+
+        /// Print only the directory path (for use with `cd $(c3pg new myapp --print-path)`)
+        #[arg(long)]
+        print_path: bool,
     },
     /// Create a throwaway project in a temporary directory
     Scratch {
@@ -69,9 +73,9 @@ pub enum Commands {
         #[arg(long)]
         standard: Option<CppStandard>,
 
-        /// Print only the directory path (for use with `cd $(c3pg scratch --path)`)
+        /// Print only the directory path (for use with `cd $(c3pg scratch --print-path)`)
         #[arg(long)]
-        path: bool,
+        print_path: bool,
     },
     /// Initialize c3pg in the current directory
     Init {

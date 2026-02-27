@@ -65,7 +65,7 @@ This will install the `c3pg` binary locally (by default in `$HOME/.cargo/bin`).
 c3pg new hello
 
 # ...or spin up a throwaway scratchpad
-cd $(c3pg scratch --path)
+cd $(c3pg scratch --print-path)
 
 # Add a dependency, build, and run
 c3pg add fmt
@@ -96,11 +96,15 @@ Options:
 
 - `--no-git`: Do not initialize a Git repository.
 - `--standard`: Set the C++ standard (default: C++20).
+- `--print-path`: Print only the directory path, for use in shell compositions.
 
-Example:
+Examples:
 
 ```bash
 c3pg new my_project --standard 17
+
+# Create and jump straight in
+cd $(c3pg new my_project --print-path)
 ```
 
 #### `scratch`
@@ -114,7 +118,7 @@ c3pg scratch [OPTIONS]
 Options:
 
 - `--standard`: Set the C++ standard (default: C++20).
-- `--path`: Print only the directory path, for use in shell compositions.
+- `--print-path`: Print only the directory path, for use in shell compositions.
 
 Examples:
 
@@ -123,7 +127,7 @@ Examples:
 c3pg scratch
 
 # Jump straight into a scratchpad
-cd $(c3pg scratch --path)
+cd $(c3pg scratch --print-path)
 ```
 
 #### `init`

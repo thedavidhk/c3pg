@@ -39,11 +39,20 @@ fn run() -> Result<()> {
             sandbox_name,
             no_git,
             standard,
-        } => cmd_new(&runner, &sandbox_name, no_git, standard.unwrap_or_default())?,
-        Commands::Scratch { standard, path } => {
+            print_path,
+        } => {
+            cmd_new(&runner, &sandbox_name, no_git, standard.unwrap_or_default())?;
+            if print_path {
+                println!("{sandbox_name}");
+            }
+        }
+        Commands::Scratch {
+            standard,
+            print_path,
+        } => {
             let dir = cmd_scratch(&runner, standard.unwrap_or_default())?;
             let dir_str = dir.display().to_string();
-            if path {
+            if print_path {
                 println!("{dir_str}");
             } else {
                 ui::status("Created", &dir_str);
