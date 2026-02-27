@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `c3pg scratch` command for quick throwaway C++ projects in a temporary directory.
+- `--print-path` flag on `new` and `scratch` for shell composition (`cd $(c3pg new myapp --print-path)`).
+
 ## 0.3.0 - 2026-02-15
 
 ### Added
