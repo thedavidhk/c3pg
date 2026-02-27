@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.1 - 2026-02-27
 
 ### Added
 - `c3pg scratch` command for quick throwaway C++ projects in a temporary directory.
