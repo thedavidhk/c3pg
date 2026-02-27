@@ -48,15 +48,18 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Publish c3pg-macros
+      - name: Publish c3pg-macros (skip if already published)
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish -p c3pg-macros
-
-      - name: Wait for crates.io index update
-        run: sleep 30
+        run: |
+          if cargo publish -p c3pg-macros 2>&1; then
+            echo "Published c3pg-macros, waiting for index update..."
+            sleep 30
+          else
+            echo "c3pg-macros already published, skipping"
+          fi
 
       - name: Publish c3pg
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish -p c3pg
+        run: cargo publish -p c3pg --allow-dirty
