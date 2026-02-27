@@ -10,7 +10,8 @@ code. The complexity still exists, but it stays under the hood.
 
 ## Features
 
-- **Quick Project Setup**: Initialize a new C++ project with a single command.
+- **Quick Project Setup**: Initialize a new C++ project with a single command, or use
+  `c3pg scratch` for a throwaway scratchpad in `/tmp/`.
 - **Convention over Configuration**: Simple projects need only a project name -- no build targets
   to declare.
 - **Unified Configuration**: Use `c3pg.toml` for all project configuration, similar to `Cargo.toml`
@@ -63,8 +64,10 @@ This will install the `c3pg` binary locally (by default in `$HOME/.cargo/bin`).
 # Create a new project
 c3pg new hello
 
+# ...or spin up a throwaway scratchpad
+cd $(c3pg scratch --path)
+
 # Add a dependency, build, and run
-cd hello
 c3pg add fmt
 # edit src/main.cpp to use fmt ...
 c3pg run
@@ -98,6 +101,29 @@ Example:
 
 ```bash
 c3pg new my_project --standard 17
+```
+
+#### `scratch`
+
+Create a throwaway project in a temporary directory. Useful for quick C++ experiments.
+
+```bash
+c3pg scratch [OPTIONS]
+```
+
+Options:
+
+- `--standard`: Set the C++ standard (default: C++20).
+- `--path`: Print only the directory path, for use in shell compositions.
+
+Examples:
+
+```bash
+# Create a scratchpad and see the path
+c3pg scratch
+
+# Jump straight into a scratchpad
+cd $(c3pg scratch --path)
 ```
 
 #### `init`

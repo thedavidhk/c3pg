@@ -154,6 +154,36 @@ fn test_new_fails_gracefully_if_conan_has_no_remotes() {
 }
 
 // ---------------------------------------------------------------------------
+// cmd_scratch tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_scratch_creates_project_in_tmp() {
+    let runner = mock_with_conan_responses();
+
+    let dir = c3pg::commands::cmd_scratch(&runner, CppStandard::default()).unwrap();
+
+    assert!(dir.exists(), "scratch directory should exist");
+    assert!(
+        dir.starts_with(std::env::temp_dir()),
+        "scratch directory should be under temp dir, got: {}",
+        dir.display()
+    );
+    assert_file_exists(&dir.join("c3pg.toml"));
+    assert_file_exists(&dir.join("src/main.cpp"));
+    assert_file_contains(&dir.join("src/main.cpp"), "Hello from C3PG!");
+    assert_file_exists(&dir.join("build/CMakeLists.txt"));
+    assert_file_exists(&dir.join("build/conanfile.py"));
+
+    // Should not have git (scratch skips git)
+    assert!(!dir.join(".gitignore").exists());
+    runner.assert_did_not_run("git");
+
+    // Clean up
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// ---------------------------------------------------------------------------
 // cmd_init tests
 // ---------------------------------------------------------------------------
 

@@ -103,6 +103,26 @@ pub fn cmd_new(
     Ok(())
 }
 
+/// Create a throwaway project in a temporary directory under `/tmp/`.
+///
+/// Returns the absolute path to the created directory.
+///
+/// # Errors
+///
+/// Returns an error if the temporary directory cannot be created or
+/// scaffolding fails.
+pub fn cmd_scratch(runner: impl CommandRunner, standard: CppStandard) -> Result<PathBuf> {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let name = format!("c3pg-scratch-{timestamp}");
+    let project_path = std::env::temp_dir().join(&name);
+    fs::create_dir_all(&project_path).context("could not create scratch directory")?;
+    scaffold_project(&runner, &project_path, &name, None, standard, true)?;
+    Ok(project_path)
+}
+
 /// Initialize a c3pg project in the current directory.
 ///
 /// If `src/` is empty, writes a starter `main.cpp`. If sources already exist,

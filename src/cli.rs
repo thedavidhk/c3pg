@@ -63,6 +63,16 @@ pub enum Commands {
         #[arg(long)]
         standard: Option<CppStandard>,
     },
+    /// Create a throwaway project in a temporary directory
+    Scratch {
+        /// Set the C++ standard
+        #[arg(long)]
+        standard: Option<CppStandard>,
+
+        /// Print only the directory path (for use with `cd $(c3pg scratch --path)`)
+        #[arg(long)]
+        path: bool,
+    },
     /// Initialize c3pg in the current directory
     Init {
         /// Do not initialize an empty git repository

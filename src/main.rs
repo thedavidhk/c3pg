@@ -6,7 +6,8 @@ use command_runner::SystemCommandRunner;
 
 use crate::cli::{Cli, Commands};
 use crate::commands::{
-    cmd_add, cmd_build, cmd_clean, cmd_init, cmd_new, cmd_remove, cmd_run, cmd_test, load_config,
+    cmd_add, cmd_build, cmd_clean, cmd_init, cmd_new, cmd_remove, cmd_run, cmd_scratch, cmd_test,
+    load_config,
 };
 
 fn build_type(release: bool) -> cmake::BuildType {
@@ -39,6 +40,16 @@ fn run() -> Result<()> {
             no_git,
             standard,
         } => cmd_new(&runner, &sandbox_name, no_git, standard.unwrap_or_default())?,
+        Commands::Scratch { standard, path } => {
+            let dir = cmd_scratch(&runner, standard.unwrap_or_default())?;
+            let dir_str = dir.display().to_string();
+            if path {
+                println!("{dir_str}");
+            } else {
+                ui::status("Created", &dir_str);
+                eprintln!("\nTo get started:\n  cd {dir_str}");
+            }
+        }
         Commands::Init { no_git, standard } => {
             cmd_init(&runner, no_git, standard.unwrap_or_default())?
         }
